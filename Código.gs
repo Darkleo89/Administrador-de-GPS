@@ -4684,15 +4684,46 @@ function obtenerTiposVehiculo(token) {
  * @param {string} token - Token de autenticación
  * @returns {object} { ok, estados: [...] }
  */
+// Obtener lista de estados activos (para el frontend)
 function obtenerEstadosVehiculo(token) {
-  // ✅ USAR validarSesion
-  var sesionResp = validarSesion(token);
-  if (!sesionResp.ok) {
-    return { ok: false, error: sesionResp.error };
+  validarSesion(token);
+  var sheet = SpreadsheetApp.getActive().getSheetByName('📋_Catálogo_Estados_Vehiculo');
+  var datos = sheet.getDataRange().getValues();
+  var estados = [];
+  for (var i = 1; i < datos.length; i++) {
+    if (datos[i][3] === true) { // Solo activos
+      estados.push({
+        id: datos[i][0],
+        nombre: datos[i][1],
+        color: datos[i][2]
+      });
+    }
   }
-  
-  // Estados predefinidos (no necesita hoja separada)
-  return { ok: true, estados: ['Activo', 'Inactivo', 'En mantenimiento'] };
+  return { ok: true, estados: estados };
+}
+// (Admin) Agregar nuevo estado
+function agregarEstadoVehiculo(token, nombre, color) {
+  validarSesion(token, [1]); // Solo Admin
+  var sheet = SpreadsheetApp.getActive().getSheetByName('📋_Catálogo_Estados_Vehiculo');
+  var ultimaFila = sheet.getLastRow();
+  var nuevoId = sheet.getRange(ultimaFila, 1).getValue() + 1;
+  sheet.appendRow([nuevoId, nombre, color, true]);
+  return { ok: true, mensaje: 'Estado agregado correctamente' };
+}
+// (Admin) Editar estado
+function editarEstadoVehiculo(token, id, nombre, color, activo) {
+  validarSesion(token, [1]);
+  var sheet = SpreadsheetApp.getActive().getSheetByName('📋_Catálogo_Estados_Vehiculo');
+  var datos = sheet.getDataRange().getValues();
+  for (var i = 1; i < datos.length; i++) {
+    if (datos[i][0] == id) {
+      sheet.getRange(i+1, 2).setValue(nombre);
+      sheet.getRange(i+1, 3).setValue(color);
+      sheet.getRange(i+1, 4).setValue(activo);
+      return { ok: true, mensaje: 'Estado actualizado' };
+    }
+  }
+  throw new Error('Estado no encontrado');
 }
 /**
  * Función de depuración para verificar equipos de un vehículo

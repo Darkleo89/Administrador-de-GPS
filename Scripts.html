@@ -8032,7 +8032,7 @@ function editarVehiculo(economico) {
                         <label class="form-label">Estado <span class="text-danger">*</span></label>
                         <select id="edit-veh-estado" class="form-select">
                           ${estados.map(function(e) {
-                            return `<option value="${e}" ${vehiculo.estado === e ? 'selected' : ''}>${e}</option>`;
+                            return `<option value="${e}" ${vehiculo.estado.nombre === e || vehiculo.estado === e ? 'selected' : ''}>${e}</option>`;
                           }).join('')}
                         </select>
                       </div>
@@ -8188,5 +8188,30 @@ function verificarEquiposVehiculo(economico) {
       .verificarEquiposVehiculoBackend(APP.token, economico);
   });
 }
+function cargarEstadosVehiculo() {
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (resp.ok) {
+        var select = document.getElementById('edit-estado-vehiculo');
+        select.innerHTML = ''; // Limpiar opciones actuales
+        resp.estados.forEach(function(estado) {
+          var option = document.createElement('option');
+          option.value = estado.nombre;
+          option.textContent = estado.nombre;
+          // Opcional: Asignar color al texto
+          option.style.color = estado.color;
+          select.appendChild(option);
+        });
+      }
+    })
+    .obtenerEstadosVehiculo(APP.token);
+}
+// En cargarFlotilla(), buscar el color del estado
+function obtenerColorEstado(estadoNombre, coloresMap) {
+  return coloresMap[estadoNombre] || 'secondary';
+}
 
+// Uso:
+var color = obtenerColorEstado(v.estado, coloresMap);
+var badgeEstado = 'badge bg-' + color;
 </script>

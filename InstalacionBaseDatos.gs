@@ -73,7 +73,8 @@ function instalarBaseDatos() {
       facturas: crearHojaFacturas(ss),
       logAuditoria: crearHojaLogAuditoria(ss),
       notificaciones: crearHojaNotificaciones(ss),
-      tickets: crearHojaTickets(ss)
+      tickets: crearHojaTickets(ss),
+      estadosVehiculo: crearHojaEstadosVehiculo(ss)
     };
     
     // 3. Configurar validaciones cruzadas
@@ -976,4 +977,54 @@ function testInstalacion() {
       if (u[0]) console.log('  -', u[1], '(rol:', u[4] + ')');
     }
   }
+}
+// ============================================================
+// CREAR HOJA: 📋_Catálogo_Estados_Vehiculo
+// ============================================================
+function crearHojaEstadosVehiculo(ss) {
+  var nombreHoja = '📋_Catálogo_Estados_Vehiculo';
+  var hoja = ss.getSheetByName(nombreHoja);
+  
+  if (hoja) {
+    ss.deleteSheet(hoja);
+  }
+  
+  hoja = ss.insertSheet(nombreHoja);
+  
+  // Encabezados
+  var headers = [
+    ['ID', 'NOMBRE', 'COLOR', 'ACTIVO', 'DESCRIPCION']
+  ];
+  hoja.getRange(1, 1, 1, 5).setValues(headers);
+  
+  // Estilos a los encabezados
+  var headerRange = hoja.getRange(1, 1, 1, 5);
+  headerRange.setFontWeight('bold');
+  headerRange.setBackground('#4A90D9');
+  headerRange.setFontColor('#FFFFFF');
+  headerRange.setHorizontalAlignment('center');
+  
+  // Datos iniciales con los estados que mencionaste
+  var datosIniciales = [
+    [1, 'Activo', 'success', true, 'Vehículo operativo y en circulación'],
+    [2, 'Inactivo', 'danger', true, 'Vehículo fuera de circulación temporal o permanente'],
+    [3, 'En Mantenimiento', 'warning', true, 'Vehículo en taller por mantenimiento programado'],
+    [4, 'Siniestrada', 'dark', true, 'Vehículo con daño por accidente o siniestro']
+  ];
+  
+  if (datosIniciales.length > 0) {
+    hoja.getRange(2, 1, datosIniciales.length, 5).setValues(datosIniciales);
+  }
+  
+  // Ajustar ancho de columnas
+  hoja.setColumnWidth(1, 50);   // ID
+  hoja.setColumnWidth(2, 160);  // NOMBRE
+  hoja.setColumnWidth(3, 100);  // COLOR
+  hoja.setColumnWidth(4, 70);   // ACTIVO
+  hoja.setColumnWidth(5, 280);  // DESCRIPCION
+  
+  // Congelar primera fila
+  hoja.setFrozenRows(1);
+  
+  Logger.log('📋 Hoja ' + nombreHoja + ' creada correctamente con 4 estados iniciales');
 }
