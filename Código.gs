@@ -4839,3 +4839,225 @@ function actualizarVehiculoCatalogo(token, economico, datos) {
     return { ok: false, error: err.message };
   }
 }
+// ============================================================
+// FUNCIONES PARA GESTIÓN DE ESTADOS DE VEHÍCULOS
+// ============================================================
+
+/**
+ * Obtiene todos los estados de vehículos disponibles para el selector
+ * @returns {Array} - Array de objetos con {id, nombre, color, activo}
+ */
+function obtenerEstadosVehiculo() {
+  try {
+    console.log('📋 Obteniendo catálogo de estados de vehículo...');
+    const sheet = SpreadsheetApp.getActiveSpreadsheet()
+      .getSheetByName('📋_Catálogo_Estados_Vehiculo');
+    
+    if (!sheet) {
+      console.warn('⚠️ No se encontró la hoja 📋_Catálogo_Estados_Vehiculo');
+      // Devolver estados por defecto si no existe la hoja
+      return [
+        { id: '1', nombre: 'Activo', color: 'success', activo: true },
+        { id: '2', nombre: 'Inactivo', color: 'danger', activo: true },
+        { id: '3', nombre: 'En Mantenimiento', color: 'warning', activo: true },
+        { id: '4', nombre: 'Siniestrada', color: 'dark', activo: true }
+      ];
+    }
+    
+    const data = sheet.getDataRange().getValues();
+    const estados = [];
+    
+    // Saltar encabezado (fila 1)
+    for (let i = 1; i < data.length; i++) {
+      const id = data[i][0];          // Columna A: ID
+      const nombre = data[i][1];      // Columna B: NOMBRE
+      const color = data[i][2];       // Columna C: COLOR
+      const activo = data[i][3] === true || data[i][3] === 'TRUE' || data[i][3] === 1;
+      const descripcion = data[i][4] || ''; // Columna E: DESCRIPCION
+      
+      if (nombre && nombre.toString().trim() !== '') {
+        estados.push({
+          id: id.toString(),
+          nombre: nombre.toString().trim(),
+          color: color ? color.toString().trim().toLowerCase() : 'secondary',
+          activo: activo,
+          descripcion: descripcion
+        });
+      }
+    }
+    
+    console.log(`✅ ${estados.length} estados cargados correctamente`);
+    return estados;
+    
+  } catch (error) {
+    console.error('❌ Error al obtener estados de vehículo:', error);
+    // Devolver estados por defecto en caso de error
+    return [
+      { id: '1', nombre: 'Activo', color: 'success', activo: true },
+      { id: '2', nombre: 'Inactivo', color: 'danger', activo: true },
+      { id: '3', nombre: 'En Mantenimiento', color: 'warning', activo: true },
+      { id: '4', nombre: 'Siniestrada', color: 'dark', activo: true }
+    ];
+  }
+}
+/**
+ * Obtiene el nombre de un estado por su ID
+ * @param {string} estadoId - ID del estado
+ * @returns {string} - Nombre del estado o 'Sin estado' si no existe
+ */
+function obtenerNombreEstadoPorId(estadoId) {
+  try {
+    const estados = obtenerEstadosVehiculo();
+    const estado = estados.find(e => e.id === estadoId.toString());
+    return estado ? estado.nombre : 'Sin estado';
+  } catch (error) {
+    console.error('❌ Error al obtener nombre del estado:', error);
+    return 'Sin estado';
+  }
+}
+/**
+ * Obtiene el color CSS para un estado
+ * @param {string} estadoId - ID del estado
+ * @returns {string} - Clase de color Bootstrap (success, danger, warning, etc.)
+ */
+function obtenerColorEstado(estadoId) {
+  try {
+    const estados = obtenerEstadosVehiculo();
+    const estado = estados.find(e => e.id === estadoId.toString());
+    return estado ? estado.color : 'secondary';
+  } catch (error) {
+    console.error('❌ Error al obtener color del estado:', error);
+    return 'secondary';
+  }
+}
+// Función mejorada para guardar vehículo en flotilla
+function guardarVehiculoFlotilla(datos) {
+  try {
+    console.log('🚚 Guardando vehículo en flotilla:', datos);
+    
+    const sheet = SHEETS.FLOTILLA();
+    if (!sheet) {
+      throw new Error('No se encontró la hoja de Flotilla');
+    }
+    
+    const { 
+      economico, 
+      placas, 
+      tipoVehiculo, 
+      marca, 
+      modelo, 
+      año,
+      serieVehiculo,
+      estado,        // ✅ Nuevo: ID del estado
+      tipoUnidad     // ✅ Nuevo: Tipo de unidad
+    } = datos;
+    
+    // Validar campos obligatorios
+    if (!economico || !placas) {
+      throw new Error('Económico y Placas son obligatorios');
+    }
+    
+    const ahora = new Date();
+    const headers = sheet.getDataRange().getValues()[0];
+    const idxEconomico = headers.indexOf('ECONOMICO');
+    const idxEstado = headers.indexOf('ESTADO'); // ✅ Columna donde se guarda el estado
+    
+    // Buscar si ya existe
+    const data = sheet.getDataRange().getValues();
+    let filaExistente = -1;
+    
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][idxEconomico] === economico) {
+        filaExistente = i + 1; // Fila real en Sheets
+        break;
+      }
+    }
+    
+    // Preparar la fila
+    const nuevaFila = [
+      economico,           // A: ECONOMICO
+      placas,              // B: PLACAS
+      tipoVehiculo || '',  // C: TIPO_VEHICULO
+      marca || '',         // D: MARCA
+      modelo || '',        // E: MODELO
+      año || '',           // F: AÑO
+      serieVehiculo || '', // G: SERIE_VEHICULO
+      '',                  // H: GPS_ACTUAL
+      estado || '',        // I: ESTADO ✅ Guardamos el ID del estado
+      ahora,               // J: ULTIMO_SERVICIO
+      tipoUnidad || ''     // K: TIPO_UNIDAD
+    ];
+    
+    if (filaExistente === -1) {
+      // Nuevo vehículo
+      sheet.appendRow(nuevaFila);
+      console.log(`✅ Vehículo ${economico} agregado correctamente`);
+    } else {
+      // Actualizar existente
+      sheet.getRange(filaExistente, 1, 1, nuevaFila.length)
+        .setValues([nuevaFila]);
+      console.log(`✅ Vehículo ${economico} actualizado correctamente`);
+    }
+    
+    return { ok: true, mensaje: 'Vehículo guardado correctamente' };
+    
+  } catch (error) {
+    console.error('❌ Error al guardar vehículo:', error);
+    return { ok: false, error: error.message };
+  }
+}
+// Función mejorada para obtener flotilla
+function obtenerFlotilla() {
+  try {
+    const sheet = SHEETS.FLOTILLA();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Flotilla' };
+    }
+    
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const idxEstado = headers.indexOf('ESTADO');
+    const idxEconomico = headers.indexOf('ECONOMICO');
+    const idxPlacas = headers.indexOf('PLACAS');
+    const idxTipoVehiculo = headers.indexOf('TIPO_VEHICULO');
+    const idxMarca = headers.indexOf('MARCA');
+    const idxModelo = headers.indexOf('MODELO');
+    const idxAño = headers.indexOf('AÑO');
+    const idxTipoUnidad = headers.indexOf('TIPO_UNIDAD');
+    
+    const vehiculos = [];
+    
+    // Obtener todos los estados para mapear
+    const estados = obtenerEstadosVehiculo();
+    
+    for (let i = 1; i < data.length; i++) {
+      const fila = data[i];
+      const estadoId = fila[idxEstado] ? fila[idxEstado].toString() : '';
+      
+      // Buscar el estado por ID
+      const estado = estados.find(e => e.id === estadoId);
+      
+      vehiculos.push({
+        economico: fila[idxEconomico] || '',
+        placas: fila[idxPlacas] || '',
+        tipoVehiculo: fila[idxTipoVehiculo] || '',
+        marca: fila[idxMarca] || '',
+        modelo: fila[idxModelo] || '',
+        año: fila[idxAño] || '',
+        tipoUnidad: fila[idxTipoUnidad] || '',
+        // ✅ Datos del estado enriquecidos
+        estadoId: estadoId,
+        estadoNombre: estado ? estado.nombre : 'Sin estado',
+        estadoColor: estado ? estado.color : 'secondary',
+        estadoDescripcion: estado ? estado.descripcion : '',
+        estadoActivo: estado ? estado.activo : false
+      });
+    }
+    
+    return { ok: true, vehiculos };
+    
+  } catch (error) {
+    console.error('❌ Error al obtener flotilla:', error);
+    return { ok: false, error: error.message };
+  }
+}

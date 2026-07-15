@@ -18,6 +18,8 @@ var _reemplazoSerieVieja = null;
 // ✅ VARIABLE GLOBAL PARA CACHÉ
 var _tiposUnidadCache = null;
 var _tiposUnidadCacheTimestamp = null;
+// Variable global para almacenar estados
+var _estadosVehiculoCache = null;
 // ════════════════════════════════════════════════════════════
 // INICIALIZACIÓN
 // ════════════════════════════════════════════════════════════
@@ -7664,116 +7666,151 @@ function guardarVehiculo() {
     })
     .agregarVehiculoCatalogo(APP.token, datos);
 }
-/**
- * Carga la flotilla con filtros
- */
 function cargarFlotilla() {
-  console.log('🚚 cargarFlotilla - Ejecutando');
-  
-  var tbody = document.getElementById('flotilla-body');
-  if (!tbody) {
-    console.warn('⚠️ No se encontró flotilla-body');
-    return;
-  }
-  
-  tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm me-2"></div>Cargando flotilla...</td></tr>';
+  console.log('🚚 Cargando flotilla...');
   
   if (!APP.token) {
-    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-danger py-3">Sesión expirada. Recarga la página.</td></tr>';
+    setTimeout(cargarFlotilla, 500);
     return;
   }
   
-  // Obtener filtros
-  var filtros = {
-    estado: document.getElementById('fil-flotilla-estado')?.value || '',
-    tipoUnidad: document.getElementById('fil-flotilla-tipo-unidad')?.value || '',
-    buscar: document.getElementById('fil-flotilla-buscar')?.value || ''
-  };
+  const tbody = document.getElementById('tabla-flotilla-body');
+  if (!tbody) return;
   
-  console.log('📌 Filtros:', filtros);
+  tbody.innerHTML = `
+    <tr>
+      <td colspan="8" class="text-center">
+        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+        Cargando vehículos...
+      </td>
+    </tr>
+  `;
   
   google.script.run
     .withSuccessHandler(function(resp) {
-      console.log('✅ Respuesta de obtenerFlotillaCompleta:', resp);
-      
       if (!resp.ok) {
-        mostrarToast('❌ Error: ' + resp.error, 'error');
-        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-danger py-3">Error al cargar flotilla</td></tr>';
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8" class="text-center text-danger">
+              <i class="bi bi-exclamation-triangle me-2"></i>
+              ${resp.error || 'Error al cargar flotilla'}
+            </td>
+          </tr>
+        `;
         return;
       }
       
-      var vehiculos = resp.vehiculos || [];
-      
-      // Actualizar resumen
-      var total = vehiculos.length;
-      var activos = 0, inactivos = 0, conEquipos = 0, sinEquipos = 0;
-      
-      vehiculos.forEach(function(v) {
-        if (v.estado === 'Activo') activos++;
-        else if (v.estado === 'Inactivo') inactivos++;
-        if (v.tieneEquipos) conEquipos++;
-        else sinEquipos++;
-      });
-      
-      document.getElementById('flotilla-total').textContent = total;
-      document.getElementById('flotilla-activos').textContent = activos;
-      document.getElementById('flotilla-inactivos').textContent = inactivos;
-      document.getElementById('flotilla-con-equipos').textContent = conEquipos;
-      document.getElementById('flotilla-sin-equipos').textContent = sinEquipos;
-      document.getElementById('flotilla-total-text').textContent = 'Total: ' + total + ' vehículos';
-      
-      if (vehiculos.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">No hay vehículos con los filtros seleccionados.</td></tr>';
+      if (resp.vehiculos.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8" class="text-center text-muted">
+              <i class="bi bi-inbox me-2"></i>
+              No hay vehículos registrados
+            </td>
+          </tr>
+        `;
         return;
       }
       
-      tbody.innerHTML = '';
-      var rol = APP.sesion ? APP.sesion.rol : 3;
-      var esAdminRevisor = rol <= 2;
-      
-      vehiculos.forEach(function(v) {
-        var tr = document.createElement('tr');
+      // Construir filas
+      let html = '';
+      resp.vehiculos.forEach(function(v) {
+        // Crear badge de estado con color
+        const badgeClass = `badge bg-${v.estadoColor}`;
+        const estadoDisplay = v.estadoNombre;
         
-        var badgeEstado = 'badge ';
-        if (v.estado === 'Activo') badgeEstado += 'bg-success';
-        else if (v.estado === 'Inactivo') badgeEstado += 'bg-danger';
-        else badgeEstado += 'bg-secondary';
-        
-        var marcaModelo = (v.marca || '') + ' ' + (v.modelo || '');
-        if (v.anio) marcaModelo += ' (' + v.anio + ')';
-        if (!marcaModelo.trim()) marcaModelo = '—';
-        
-        var accesoriosStr = v.accesorios.length > 0 ? v.accesorios.join(', ') : '—';
-        
-        tr.innerHTML = `
-          <td><strong>${v.economico}</strong></td>
-          <td>${v.placas || '—'}</td>
-          <td>${v.tipoVehiculo || '—'}</td>
-          <td>${marcaModelo}</td>
-          <td><span class="${badgeEstado}" style="font-size:11px;">${v.estado || '—'}</span></td>
-          <td>${v.tipoUnidad || '—'}</td>
-          <td>${v.gatewaySerie ? '<code>' + v.gatewaySerie + '</code>' : '—'}</td>
-          <td>${v.camaraSerie ? '<code>' + v.camaraSerie + '</code>' : '—'}</td>
-          <td style="font-size:12px;">${accesoriosStr}</td>
-          <td style="white-space: nowrap;">
-            <button class="btn btn-sm btn-outline-primary" onclick="verDetalleVehiculo('${v.economico}')" title="Ver detalle" style="padding:2px 6px;font-size:12px;margin-right:2px;">
-              <i class="bi bi-eye"></i>
-            </button>
-            ${esAdminRevisor ? `
-              <button class="btn btn-sm btn-outline-success" onclick="editarVehiculo('${v.economico}')" title="Editar vehículo" style="padding:2px 6px;font-size:12px;margin-right:2px;">
+        html += `
+          <tr>
+            <td><strong>${v.economico || '-'}</strong></td>
+            <td>${v.placas || '-'}</td>
+            <td>${v.tipoVehiculo || '-'}</td>
+            <td>${v.marca || '-'} ${v.modelo || ''}</td>
+            <td>${v.año || '-'}</td>
+            <td>${v.tipoUnidad || '-'}</td>
+            <td>
+              <span class="${badgeClass}">
+                ${estadoDisplay}
+              </span>
+            </td>
+            <td>
+              <button class="btn btn-sm btn-outline-primary" 
+                      onclick="abrirModalEstado('${v.economico}')"
+                      title="Cambiar estado">
                 <i class="bi bi-pencil"></i>
               </button>
-            ` : ''}
-          </td>
+            </td>
+          </tr>
         `;
-        tbody.appendChild(tr);
       });
+      
+      tbody.innerHTML = html;
+      console.log(`✅ Flotilla cargada: ${resp.vehiculos.length} vehículos`);
     })
     .withFailureHandler(function(err) {
-      console.error('❌ Error en cargarFlotilla:', err);
-      tbody.innerHTML = '<tr><td colspan="10" class="text-center text-danger py-3">Error: ' + err.message + '</td></tr>';
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" class="text-center text-danger">
+            Error: ${err.message}
+          </td>
+        </tr>
+      `;
+      console.error('❌ Error al cargar flotilla:', err);
     })
-    .obtenerFlotillaCompleta(APP.token, filtros);
+    .obtenerFlotilla();
+}
+// ============================================================
+// MODAL PARA CAMBIAR ESTADO
+// ============================================================
+
+/**
+ * Abre el modal para cambiar el estado de un vehículo
+ */
+function abrirModalEstado(economico) {
+  console.log('📋 Abriendo modal para cambiar estado de:', economico);
+  
+  // Mostrar el económico en el modal
+  var econLabel = document.getElementById('modal-estado-economico');
+  if (econLabel) econLabel.textContent = economico;
+  
+  // Cargar estados en el selector
+  cargarEstadosVehiculo('selector-estado-flotilla');
+  
+  // Guardar el económico en un atributo del modal
+  var modal = document.getElementById('modal-cambiar-estado');
+  if (modal) {
+    modal.dataset.economico = economico;
+  }
+  
+  // Mostrar el modal
+  var modalInstance = new bootstrap.Modal(document.getElementById('modal-cambiar-estado'));
+  modalInstance.show();
+}
+/**
+ * Cambia el estado del vehículo
+ */
+function cambiarEstadoVehiculo() {
+  var selector = document.getElementById('selector-estado-flotilla');
+  var estadoId = selector.value;
+  
+  if (!estadoId) {
+    mostrarToast('Por favor selecciona un estado', 'warning');
+    return;
+  }
+  
+  var modal = document.getElementById('modal-cambiar-estado');
+  var economico = modal.dataset.economico;
+  
+  if (!economico) {
+    mostrarToast('No se pudo identificar el vehículo', 'danger');
+    return;
+  }
+  
+  // Llamar a la función que actualiza el estado
+  actualizarEstadoVehiculo(economico, estadoId);
+  
+  // Cerrar modal
+  var modalInstance = bootstrap.Modal.getInstance(modal);
+  if (modalInstance) modalInstance.hide();
 }
 /**
  * Carga los tipos de unidad en el filtro de flotilla
@@ -8214,4 +8251,248 @@ function obtenerColorEstado(estadoNombre, coloresMap) {
 // Uso:
 var color = obtenerColorEstado(v.estado, coloresMap);
 var badgeEstado = 'badge bg-' + color;
+
+/**
+ * Carga los estados de vehículos desde el backend
+ */
+function cargarEstadosVehiculo(selectorId) {
+  console.log('📋 Cargando estados de vehículo...');
+  
+  // Si no hay token, esperar
+  if (!APP.token) {
+    setTimeout(function() { cargarEstadosVehiculo(selectorId); }, 500);
+    return;
+  }
+  
+  // Usar caché si existe (5 minutos)
+  if (_estadosVehiculoCache && (Date.now() - _estadosVehiculoCache.timestamp < 300000)) {
+    console.log('📋 Usando estados en caché');
+    renderEstadosEnSelector(selectorId, _estadosVehiculoCache.estados);
+    return;
+  }
+  
+  google.script.run
+    .withSuccessHandler(function(estados) {
+      console.log('✅ Estados cargados:', estados);
+      
+      // Guardar en caché
+      _estadosVehiculoCache = {
+        estados: estados,
+        timestamp: Date.now()
+      };
+      
+      renderEstadosEnSelector(selectorId, estados);
+    })
+    .withFailureHandler(function(error) {
+      console.error('❌ Error al cargar estados:', error);
+      mostrarToast('Error al cargar estados de vehículos', 'danger');
+    })
+    .obtenerEstadosVehiculo();
+}
+/**
+ * Renderiza los estados en un selector
+ */
+function renderEstadosEnSelector(selectorId, estados) {
+  var selector = document.getElementById(selectorId);
+  if (!selector) {
+    console.warn('⚠️ Selector no encontrado:', selectorId);
+    return;
+  }
+  
+  // Guardar valor seleccionado actual
+  var valorActual = selector.value;
+  
+  // Limpiar selector
+  selector.innerHTML = '<option value="">Selecciona un estado...</option>';
+  
+  // Agregar opciones
+  estados.forEach(function(estado) {
+    // Solo mostrar estados activos
+    if (estado.activo === false) return;
+    
+    var option = document.createElement('option');
+    option.value = estado.id;
+    option.textContent = estado.nombre;
+    
+    // Agregar un pequeño indicador de color
+    if (estado.color) {
+      option.style.borderLeft = '4px solid var(--bs-' + estado.color + ')';
+      option.style.paddingLeft = '8px';
+    }
+    
+    selector.appendChild(option);
+  });
+  
+  // Restaurar valor seleccionado si existía
+  if (valorActual) {
+    selector.value = valorActual;
+  }
+  
+  console.log('✅ Selector ' + selectorId + ' cargado con ' + estados.length + ' estados');
+}
+
+/**
+ * Actualiza el estado de un vehículo en el backend
+ */
+/**
+ * Actualiza el estado de un vehículo en el backend
+ */
+function actualizarEstadoVehiculo(economico, nuevoEstadoId) {
+  if (!economico || !nuevoEstadoId) {
+    mostrarToast('Datos incompletos para actualizar estado', 'warning');
+    return;
+  }
+  
+  mostrarToast('🔄 Actualizando estado del vehículo...', 'info');
+  
+  // Primero obtener los datos actuales del vehículo
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok) {
+        mostrarToast('Error: ' + resp.error, 'danger');
+        return;
+      }
+      
+      // Encontrar el vehículo específico
+      var vehiculo = resp.vehiculos.find(function(v) { return v.economico === economico; });
+      if (!vehiculo) {
+        mostrarToast('Vehículo no encontrado', 'danger');
+        return;
+      }
+      
+      // Actualizar solo el estado
+      var datosActualizados = {
+        economico: vehiculo.economico,
+        placas: vehiculo.placas,
+        tipoVehiculo: vehiculo.tipoVehiculo,
+        marca: vehiculo.marca,
+        modelo: vehiculo.modelo,
+        año: vehiculo.año,
+        serieVehiculo: vehiculo.serieVehiculo || '',
+        estado: nuevoEstadoId,
+        tipoUnidad: vehiculo.tipoUnidad || ''
+      };
+      
+      // Guardar con el nuevo estado
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.ok) {
+            mostrarToast('✅ Estado actualizado correctamente', 'success');
+            // Recargar la tabla
+            cargarFlotilla();
+          } else {
+            mostrarToast('Error: ' + result.error, 'danger');
+          }
+        })
+        .withFailureHandler(function(err) {
+          mostrarToast('Error al actualizar: ' + err.message, 'danger');
+        })
+        .guardarVehiculoFlotilla(datosActualizados);
+    })
+    .withFailureHandler(function(err) {
+      mostrarToast('Error al obtener vehículo: ' + err.message, 'danger');
+    })
+    .obtenerFlotilla();
+}
+
+// ============================================================
+// SOBREESCRIBIR cargarFlotilla PARA QUE USE ESTADOS
+// ============================================================
+
+// Guardamos la función original por si la necesitamos
+var _cargarFlotillaOriginal = cargarFlotilla;
+
+// Sobreescribimos la función
+cargarFlotilla = function() {
+  console.log('🚚 Cargando flotilla con estados...');
+  
+  if (!APP.token) {
+    setTimeout(cargarFlotilla, 500);
+    return;
+  }
+  
+  var tbody = document.getElementById('flotilla-body');
+  if (!tbody) return;
+  
+  tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">' +
+    '<div class="spinner-border spinner-border-sm me-2" role="status"></div>Cargando vehículos...</td></tr>';
+  
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok) {
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-danger py-3">' +
+          '<i class="bi bi-exclamation-triangle me-2"></i>' + (resp.error || 'Error al cargar flotilla') +
+          '</td></tr>';
+        return;
+      }
+      
+      if (resp.vehiculos.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">' +
+          '<i class="bi bi-inbox me-2"></i>No hay vehículos registrados</td></tr>';
+        return;
+      }
+      
+      // Construir filas
+      var html = '';
+      resp.vehiculos.forEach(function(v) {
+        // Crear badge de estado con color
+        var badgeClass = 'badge bg-' + (v.estadoColor || 'secondary');
+        var estadoDisplay = v.estadoNombre || 'Sin estado';
+        
+        html += '<tr>' +
+          '<td><strong>' + (v.economico || '-') + '</strong></td>' +
+          '<td>' + (v.placas || '-') + '</td>' +
+          '<td>' + (v.tipoVehiculo || '-') + '</td>' +
+          '<td>' + (v.marca || '') + ' ' + (v.modelo || '') + '</td>' +
+          '<td><span class="' + badgeClass + '">' + estadoDisplay + '</span></td>' +
+          '<td>' + (v.tipoUnidad || '-') + '</td>' +
+          '<td>' + (v.gateway || '-') + '</td>' +
+          '<td>' + (v.camara || '-') + '</td>' +
+          '<td>' + (v.accesorios || '-') + '</td>' +
+          '<td>' +
+            '<button class="btn btn-sm btn-outline-primary" onclick="abrirModalEstado(\'' + v.economico + '\')" title="Cambiar estado">' +
+              '<i class="bi bi-pencil"></i>' +
+            '</button>' +
+          '</td>' +
+        '</tr>';
+      });
+      
+      tbody.innerHTML = html;
+      console.log('✅ Flotilla cargada: ' + resp.vehiculos.length + ' vehículos');
+      
+      // Actualizar resumen
+      actualizarResumenFlotilla(resp.vehiculos);
+    })
+    .withFailureHandler(function(err) {
+      tbody.innerHTML = '<tr><td colspan="10" class="text-center text-danger py-3">' +
+        'Error: ' + err.message + '</td></tr>';
+      console.error('❌ Error al cargar flotilla:', err);
+    })
+    .obtenerFlotilla();
+};
+/**
+ * Actualiza los resúmenes de la flotilla
+ */
+function actualizarResumenFlotilla(vehiculos) {
+  var total = vehiculos.length;
+  var activos = vehiculos.filter(function(v) { 
+    return v.estadoNombre === 'Activo' || v.estadoId === '1'; 
+  }).length;
+  var inactivos = vehiculos.filter(function(v) { 
+    return v.estadoNombre === 'Inactivo' || v.estadoId === '2'; 
+  }).length;
+  var conEquipos = vehiculos.filter(function(v) { 
+    return v.gateway && v.gateway !== ''; 
+  }).length;
+  var sinEquipos = vehiculos.filter(function(v) { 
+    return !v.gateway || v.gateway === ''; 
+  }).length;
+  
+  document.getElementById('flotilla-total').textContent = total;
+  document.getElementById('flotilla-activos').textContent = activos;
+  document.getElementById('flotilla-inactivos').textContent = inactivos;
+  document.getElementById('flotilla-con-equipos').textContent = conEquipos;
+  document.getElementById('flotilla-sin-equipos').textContent = sinEquipos;
+  document.getElementById('flotilla-total-text').textContent = 'Total: ' + total + ' vehículos';
+}
 </script>
