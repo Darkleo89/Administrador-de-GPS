@@ -7419,15 +7419,60 @@ function limpiarFiltrosTickets() {
 // ============================================================
 // FUNCIONES PARA AGREGAR/EDITAR VEHÍCULOS EN FLOTILLA
 // ============================================================
-
+/**
+ * Verifica si todas las respuestas del backend han llegado
+ * Cuando todas están listas, renderiza el modal
+ */
+function verificarCompletado() {
+  // Incrementar el contador de respuestas recibidas
+  respuestasRecibidas++;
+  
+  console.log(`📊 Progreso de carga: ${respuestasRecibidas}/${totalRespuestas}`);
+  
+  // Si ya tenemos todas las respuestas, renderizar el modal
+  if (respuestasRecibidas >= totalRespuestas) {
+    console.log('✅ Todos los datos cargados, renderizando modal...');
+    
+    // Verificar que tenemos datos válidos
+    if (!window._tiposUnidadTemp || window._tiposUnidadTemp.length === 0) {
+      console.warn('⚠️ Tipos de unidad no cargados, usando valores por defecto');
+      window._tiposUnidadTemp = ['UNIDAD', 'UTILITARIA', 'CAJA SECA', 'MÓVIL', 'DOLLY', 'REMOLQUE'];
+    }
+    
+    if (!window._tiposVehiculoTemp || window._tiposVehiculoTemp.length === 0) {
+      console.warn('⚠️ Tipos de vehículo no cargados, usando valores por defecto');
+      window._tiposVehiculoTemp = ['UTILITARIA', 'CAMION', 'VAN', 'PICKUP', 'AUTOMOVIL', 'TRACTOCAMION', 'REMOLQUE'];
+    }
+    
+    if (!window._estadosTemp || window._estadosTemp.length === 0) {
+      console.warn('⚠️ Estados no cargados, usando valores por defecto');
+      window._estadosTemp = [
+        { id: '1', nombre: 'Activo', color: 'success', activo: true },
+        { id: '2', nombre: 'Inactivo', color: 'danger', activo: true },
+        { id: '3', nombre: 'En Mantenimiento', color: 'warning', activo: true },
+        { id: '4', nombre: 'Siniestrada', color: 'dark', activo: true }
+      ];
+    }
+    
+    // Renderizar el modal con todos los datos
+    renderizarModal();
+  }
+}
 /**
  * Muestra el formulario para agregar un nuevo vehículo
- * VERSIÓN CORREGIDA - Usa callbacks en lugar de promesas con google.script.run
+ */
+// Variables globales para almacenar los datos temporalmente
+window._tiposUnidadTemp = [];
+window._tiposVehiculoTemp = [];
+window._estadosTemp = [];
+/**
+ * Muestra el formulario para agregar un nuevo vehículo
+ * Carga los datos necesarios y renderiza el modal
  */
 function mostrarFormAgregarVehiculo() {
   console.log('🚚 Abriendo formulario para agregar vehículo');
   
-  // Verificar permisos
+  // Verificar permisos (solo Admin o Revisor)
   if (!APP.sesion || APP.sesion.rol > 2) {
     mostrarToast('⚠️ No tienes permisos para agregar vehículos.', 'error');
     return;
@@ -7435,145 +7480,135 @@ function mostrarFormAgregarVehiculo() {
 
   mostrarToast('📋 Cargando formulario...', 'info');
 
-  // Variable para contar respuestas
+  // Resetear variables temporales
+  window._tiposUnidadTemp = [];
+  window._tiposVehiculoTemp = [];
+  window._estadosTemp = [];
+  
+  // Inicializar contadores
   var respuestasRecibidas = 0;
   var totalRespuestas = 3;
-  
-  // Almacenar datos
-  var tiposUnidad = [];
-  var tiposVehiculo = ['Camión', 'Pickup', 'Van', 'Otro']; // Valores por defecto
-  var estados = ['Activo', 'Inactivo']; // Valores por defecto
 
-  /**
-   * Función que se ejecuta cuando todas las respuestas están listas
-   */
-  function renderizarModal() {
-    console.log('✅ Todos los datos cargados, renderizando modal...');
+  // Función para verificar completado
+  function verificarCompletado() {
+    respuestasRecibidas++;
+    console.log(`📊 Progreso de carga: ${respuestasRecibidas}/${totalRespuestas}`);
     
-    var modalHtml = `
-      <div class="modal fade" id="modalAgregarVehiculo" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered modal-lg">
-          <div class="modal-content">
-            <div class="modal-header">
-              <h5 class="modal-title">🚗 Agregar vehículo al catálogo</h5>
-              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-              <div class="alert alert-info small">
-                <i class="bi bi-info-circle me-1"></i>
-                Los campos marcados con <span class="text-danger">*</span> son obligatorios.
-              </div>
-
-              <div class="row g-3">
-                <!-- Económico -->
-                <div class="col-md-4">
-                  <label class="form-label">Económico <span class="text-danger">*</span></label>
-                  <input type="text" id="veh-economico" class="form-control" placeholder="Ej: G-500" required>
-                </div>
-                <!-- Placas -->
-                <div class="col-md-4">
-                  <label class="form-label">Placas <span class="text-danger">*</span></label>
-                  <input type="text" id="veh-placas" class="form-control" placeholder="Ej: ABC-123-X" required>
-                </div>
-                <!-- Tipo Vehículo -->
-                <div class="col-md-4">
-                  <label class="form-label">Tipo de vehículo <span class="text-danger">*</span></label>
-                  <select id="veh-tipo" class="form-select">
-                    <option value="">-- Selecciona --</option>
-                    ${tiposVehiculo.map(function(t) {
-                      return `<option value="${t}">${t}</option>`;
-                    }).join('')}
-                  </select>
-                </div>
-
-                <!-- Marca -->
-                <div class="col-md-4">
-                  <label class="form-label">Marca</label>
-                  <input type="text" id="veh-marca" class="form-control" placeholder="Ej: Ford">
-                </div>
-                <!-- Modelo -->
-                <div class="col-md-4">
-                  <label class="form-label">Modelo</label>
-                  <input type="text" id="veh-modelo" class="form-control" placeholder="Ej: F-350">
-                </div>
-                <!-- Año -->
-                <div class="col-md-4">
-                  <label class="form-label">Año</label>
-                  <input type="number" id="veh-anio" class="form-control" placeholder="Ej: 2024" min="1990" max="2030">
-                </div>
-
-                <!-- Serie Vehículo -->
-                <div class="col-md-6">
-                  <label class="form-label">Serie del vehículo</label>
-                  <input type="text" id="veh-serie" class="form-control" placeholder="Número de serie del vehículo" oninput="this.value=this.value.toUpperCase()">
-                </div>
-                <!-- GPS Actual -->
-                <div class="col-md-6">
-                  <label class="form-label">Estado GPS</label>
-                  <select id="veh-gps" class="form-select">
-                    <option value="">-- Selecciona --</option>
-                    <option value="Instalado">Instalado</option>
-                    <option value="Pendiente">Pendiente</option>
-                    <option value="Sin GPS">Sin GPS</option>
-                  </select>
-                </div>
-
-                <!-- Estado (USANDO CATÁLOGO) -->
-                <div class="col-md-6">
-                  <label class="form-label">Estado <span class="text-danger">*</span></label>
-                  <select id="veh-estado" class="form-select">
-                    <option value="">-- Selecciona un estado --</option>
-                    ${estados.map(function(e) {
-                      // Si e es un objeto (del catálogo), usar su nombre e id
-                      var id = e.id || e;
-                      var nombre = e.nombre || e;
-                      var selected = nombre === 'Activo' ? 'selected' : '';
-                      return `<option value="${id}" ${selected}>${nombre}</option>`;
-                    }).join('')}
-                  </select>
-                  <div class="form-text text-muted small">
-                    <i class="bi bi-info-circle me-1"></i>
-                    Estados definidos en 📋_Catálogo_Estados_Vehiculo
-                  </div>
-                </div>
-                <!-- Tipo Unidad -->
-                <div class="col-md-6">
-                  <label class="form-label">Tipo de unidad</label>
-                  <select id="veh-tipo-unidad" class="form-select">
-                    <option value="">-- Selecciona --</option>
-                    ${tiposUnidad.map(function(t) {
-                      return `<option value="${t}">${t}</option>`;
-                    }).join('')}
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div class="modal-footer">
-              <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-              <button class="btn btn-primary" onclick="guardarVehiculo()">
-                <i class="bi bi-save me-1"></i>Guardar vehículo
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-
-    // Remover modal anterior si existe
-    var modalExistente = document.getElementById('modalAgregarVehiculo');
-    if (modalExistente) modalExistente.remove();
-
-    // Agregar modal al DOM
-    var div = document.createElement('div');
-    div.innerHTML = modalHtml;
-    document.body.appendChild(div);
-
-    // Mostrar modal
-    var modal = new bootstrap.Modal(document.getElementById('modalAgregarVehiculo'));
-    modal.show();
-    
-    mostrarToast('✅ Formulario listo', 'success');
+    if (respuestasRecibidas >= totalRespuestas) {
+      console.log('✅ Todos los datos cargados, renderizando modal...');
+      
+      // Validar datos y usar valores por defecto si es necesario
+      if (!window._tiposUnidadTemp || window._tiposUnidadTemp.length === 0) {
+        console.warn('⚠️ Tipos de unidad no cargados, usando valores por defecto');
+        window._tiposUnidadTemp = ['UNIDAD', 'UTILITARIA', 'CAJA SECA', 'MÓVIL', 'DOLLY', 'REMOLQUE'];
+      }
+      
+      if (!window._tiposVehiculoTemp || window._tiposVehiculoTemp.length === 0) {
+        console.warn('⚠️ Tipos de vehículo no cargados, usando valores por defecto');
+        window._tiposVehiculoTemp = ['UTILITARIA', 'CAMION', 'VAN', 'PICKUP', 'AUTOMOVIL', 'TRACTOCAMION', 'REMOLQUE'];
+      }
+      
+      if (!window._estadosTemp || window._estadosTemp.length === 0) {
+        console.warn('⚠️ Estados no cargados, usando valores por defecto');
+        window._estadosTemp = [
+          { id: '1', nombre: 'Activo', color: 'success', activo: true },
+          { id: '2', nombre: 'Inactivo', color: 'danger', activo: true },
+          { id: '3', nombre: 'En Mantenimiento', color: 'warning', activo: true },
+          { id: '4', nombre: 'Siniestrada', color: 'dark', activo: true }
+        ];
+      }
+      
+      // Renderizar el modal con todos los datos
+      renderizarModal();
+    }
   }
+
+  // 1. OBTENER TIPOS DE UNIDAD
+  if (typeof obtenerTiposUnidad === 'function') {
+    google.script.run
+      .withSuccessHandler(function(resp) {
+        console.log('✅ Tipos de unidad recibidos:', resp);
+        if (resp && resp.ok && resp.tipos) {
+          window._tiposUnidadTemp = resp.tipos;
+        } else if (Array.isArray(resp)) {
+          window._tiposUnidadTemp = resp;
+        } else {
+          window._tiposUnidadTemp = ['UNIDAD', 'UTILITARIA', 'CAJA SECA', 'MÓVIL', 'DOLLY', 'REMOLQUE'];
+        }
+        verificarCompletado();
+      })
+      .withFailureHandler(function(err) {
+        console.error('❌ Error al obtener tipos de unidad:', err);
+        window._tiposUnidadTemp = ['UNIDAD', 'UTILITARIA', 'CAJA SECA', 'MÓVIL', 'DOLLY', 'REMOLQUE'];
+        verificarCompletado();
+      })
+      .obtenerTiposUnidad(APP.token);
+  } else {
+    console.warn('⚠️ Función obtenerTiposUnidad no disponible, usando valores por defecto');
+    window._tiposUnidadTemp = ['UNIDAD', 'UTILITARIA', 'CAJA SECA', 'MÓVIL', 'DOLLY', 'REMOLQUE'];
+    verificarCompletado();
+  }
+
+  // 2. OBTENER TIPOS DE VEHÍCULO
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      console.log('✅ Tipos de vehículo recibidos:', resp);
+      if (resp && resp.ok && resp.tipos) {
+        window._tiposVehiculoTemp = resp.tipos;
+      } else if (Array.isArray(resp)) {
+        window._tiposVehiculoTemp = resp;
+      } else {
+        window._tiposVehiculoTemp = ['UTILITARIA', 'CAMION', 'VAN', 'PICKUP', 'AUTOMOVIL', 'TRACTOCAMION', 'REMOLQUE'];
+      }
+      verificarCompletado();
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al obtener tipos de vehículo:', err);
+      window._tiposVehiculoTemp = ['UTILITARIA', 'CAMION', 'VAN', 'PICKUP', 'AUTOMOVIL', 'TRACTOCAMION', 'REMOLQUE'];
+      verificarCompletado();
+    })
+    .obtenerTiposVehiculo(APP.token);
+
+  // 3. OBTENER ESTADOS DEL CATÁLOGO
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      console.log('✅ Estados recibidos:', resp);
+      if (resp && resp.ok && resp.estados) {
+        window._estadosTemp = resp.estados;
+      } else if (Array.isArray(resp) && resp.length > 0) {
+        if (typeof resp[0] === 'object') {
+          window._estadosTemp = resp;
+        } else {
+          window._estadosTemp = resp.map(function(e) { 
+            return { id: e, nombre: e }; 
+          });
+        }
+      } else {
+        window._estadosTemp = [
+          { id: '1', nombre: 'Activo', color: 'success', activo: true },
+          { id: '2', nombre: 'Inactivo', color: 'danger', activo: true },
+          { id: '3', nombre: 'En Mantenimiento', color: 'warning', activo: true },
+          { id: '4', nombre: 'Siniestrada', color: 'dark', activo: true }
+        ];
+      }
+      verificarCompletado();
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al obtener estados:', err);
+      window._estadosTemp = [
+        { id: '1', nombre: 'Activo', color: 'success', activo: true },
+        { id: '2', nombre: 'Inactivo', color: 'danger', activo: true },
+        { id: '3', nombre: 'En Mantenimiento', color: 'warning', activo: true },
+        { id: '4', nombre: 'Siniestrada', color: 'dark', activo: true }
+      ];
+      verificarCompletado();
+    })
+    .obtenerEstadosVehiculo(APP.token);
+}
+// ============================================================
+// FUNCIONES PARA AGREGAR/EDITAR VEHÍCULOS EN FLOTILLA
+// ============================================================
+
 /**
  * Muestra el formulario para editar un vehículo existente
  */
@@ -7585,9 +7620,13 @@ function mostrarFormEditarVehiculo(economico) {
     return;
   }
   
+  mostrarToast('📋 Cargando datos del vehículo...', 'info');
+  
   // Obtener datos del vehículo
   google.script.run
     .withSuccessHandler(function(resp) {
+      console.log('✅ Respuesta de obtenerFlotilla:', resp);
+      
       if (!resp.ok) {
         mostrarToast('Error: ' + resp.error, 'danger');
         return;
@@ -7602,43 +7641,89 @@ function mostrarFormEditarVehiculo(economico) {
         return;
       }
       
-      // Llenar el formulario
-      document.getElementById('modal-vehiculo-economico').value = vehiculo.economico || '';
-      document.getElementById('modal-vehiculo-placas').value = vehiculo.placas || '';
-      document.getElementById('modal-vehiculo-tipo').value = vehiculo.tipoVehiculo || '';
-      document.getElementById('modal-vehiculo-marca').value = vehiculo.marca || '';
-      document.getElementById('modal-vehiculo-modelo').value = vehiculo.modelo || '';
-      document.getElementById('modal-vehiculo-ano').value = vehiculo.año || '';
-      document.getElementById('modal-vehiculo-tipo-unidad').value = vehiculo.tipoUnidad || '';
-      document.getElementById('modal-vehiculo-serie').value = vehiculo.serieVehiculo || '';
-      document.getElementById('modal-vehiculo-editando').value = 'true';
-      document.getElementById('modal-vehiculo-titulo').textContent = 'Editar Vehículo: ' + economico;
+      // Primero cargar datos en variables temporales
+      window._tiposUnidadTemp = ['UNIDAD', 'UTILITARIA', 'CAJA SECA', 'MÓVIL', 'DOLLY', 'REMOLQUE'];
+      window._tiposVehiculoTemp = ['UTILITARIA', 'CAMION', 'VAN', 'PICKUP', 'AUTOMOVIL', 'TRACTOCAMION', 'REMOLQUE'];
       
-      // Hacer el campo económico readonly en edición
-      document.getElementById('modal-vehiculo-economico').readOnly = true;
-      
-      // Cargar estados y seleccionar el actual
-      cargarEstadosVehiculoConSeleccion('modal-vehiculo-estado', vehiculo.estadoId);
-      
-      // Mostrar modal
-      var modal = new bootstrap.Modal(document.getElementById('modal-vehiculo-flotilla'));
-      modal.show();
+      // Cargar estados y luego renderizar modal en modo edición
+      google.script.run
+        .withSuccessHandler(function(estados) {
+          window._estadosTemp = estados;
+          
+          // Renderizar modal
+          renderizarModal();
+          
+          // Llenar el formulario después de que el modal esté en el DOM
+          setTimeout(function() {
+            document.getElementById('modal-vehiculo-economico').value = vehiculo.economico || '';
+            document.getElementById('modal-vehiculo-placas').value = vehiculo.placas || '';
+            document.getElementById('modal-vehiculo-tipo').value = vehiculo.tipoVehiculo || '';
+            document.getElementById('modal-vehiculo-marca').value = vehiculo.marca || '';
+            document.getElementById('modal-vehiculo-modelo').value = vehiculo.modelo || '';
+            document.getElementById('modal-vehiculo-ano').value = vehiculo.año || '';
+            document.getElementById('modal-vehiculo-tipo-unidad').value = vehiculo.tipoUnidad || '';
+            document.getElementById('modal-vehiculo-serie').value = vehiculo.serieVehiculo || '';
+            document.getElementById('modal-vehiculo-editando').value = 'true';
+            document.getElementById('modal-vehiculo-titulo').textContent = 'Editar Vehículo: ' + economico;
+            document.getElementById('modal-vehiculo-economico').readOnly = true;
+            
+            // Seleccionar el estado actual
+            if (vehiculo.estadoId) {
+              var estadoSelect = document.getElementById('modal-vehiculo-estado');
+              for (var i = 0; i < estadoSelect.options.length; i++) {
+                if (estadoSelect.options[i].value === vehiculo.estadoId.toString()) {
+                  estadoSelect.selectedIndex = i;
+                  break;
+                }
+              }
+            }
+          }, 100);
+        })
+        .withFailureHandler(function(err) {
+          console.error('❌ Error al cargar estados:', err);
+          mostrarToast('Error al cargar estados', 'danger');
+        })
+        .obtenerEstadosVehiculo(APP.token);
     })
     .withFailureHandler(function(err) {
+      console.error('❌ Error al cargar vehículo:', err);
       mostrarToast('Error al cargar vehículo: ' + err.message, 'danger');
     })
     .obtenerFlotilla();
 }
-  /**
-   * Función para verificar si todas las respuestas llegaron
-   */
-  function verificarCompletado() {
-    respuestasRecibidas++;
-    console.log(`📊 Progreso: ${respuestasRecibidas}/${totalRespuestas}`);
-    if (respuestasRecibidas >= totalRespuestas) {
-      renderizarModal();
-    }
+
+
+/**
+ * Carga estados y selecciona uno específico
+ */
+function cargarEstadosVehiculoConSeleccion(selectorId, estadoIdSeleccionado) {
+  if (!APP.token) {
+    setTimeout(function() { 
+      cargarEstadosVehiculoConSeleccion(selectorId, estadoIdSeleccionado); 
+    }, 500);
+    return;
   }
+  
+  // Usar caché si existe
+  if (_estadosVehiculoCache && (Date.now() - _estadosVehiculoCache.timestamp < 300000)) {
+    renderEstadosEnSelector(selectorId, _estadosVehiculoCache.estados, estadoIdSeleccionado);
+    return;
+  }
+  
+  google.script.run
+    .withSuccessHandler(function(estados) {
+      _estadosVehiculoCache = {
+        estados: estados,
+        timestamp: Date.now()
+      };
+      renderEstadosEnSelector(selectorId, estados, estadoIdSeleccionado);
+    })
+    .withFailureHandler(function(error) {
+      console.error('❌ Error al cargar estados:', error);
+      mostrarToast('Error al cargar estados', 'danger');
+    })
+    .obtenerEstadosVehiculo();
+}
 
   // 1. OBTENER TIPOS DE UNIDAD
   if (typeof obtenerTiposUnidad === 'function') {
@@ -7722,37 +7807,7 @@ function mostrarFormEditarVehiculo(economico) {
     })
     .obtenerEstadosVehiculo(APP.token);
 }
-/**
- * Carga estados y selecciona uno específico
- */
-function cargarEstadosVehiculoConSeleccion(selectorId, estadoIdSeleccionado) {
-  if (!APP.token) {
-    setTimeout(function() { 
-      cargarEstadosVehiculoConSeleccion(selectorId, estadoIdSeleccionado); 
-    }, 500);
-    return;
-  }
-  
-  // Usar caché si existe
-  if (_estadosVehiculoCache && (Date.now() - _estadosVehiculoCache.timestamp < 300000)) {
-    renderEstadosEnSelector(selectorId, _estadosVehiculoCache.estados, estadoIdSeleccionado);
-    return;
-  }
-  
-  google.script.run
-    .withSuccessHandler(function(estados) {
-      _estadosVehiculoCache = {
-        estados: estados,
-        timestamp: Date.now()
-      };
-      renderEstadosEnSelector(selectorId, estados, estadoIdSeleccionado);
-    })
-    .withFailureHandler(function(error) {
-      console.error('❌ Error al cargar estados:', error);
-      mostrarToast('Error al cargar estados', 'danger');
-    })
-    .obtenerEstadosVehiculo();
-}
+
 /**
  * Renderiza estados con selección
  */
@@ -7777,6 +7832,7 @@ function renderEstadosEnSelector(selectorId, estados, estadoSeleccionado) {
     selector.appendChild(option);
   });
 }
+
 /**
  * Guarda o actualiza un vehículo en la flotilla
  */
@@ -7797,13 +7853,21 @@ function guardarVehiculoFlotilla() {
   };
   
   // Validar campos obligatorios
-  if (!datos.economico || !datos.placas) {
-    mostrarToast('Económico y Placas son obligatorios', 'warning');
+  if (!datos.economico) {
+    mostrarToast('⚠️ El campo Económico es obligatorio', 'warning');
+    document.getElementById('modal-vehiculo-economico').focus();
+    return;
+  }
+  
+  if (!datos.placas) {
+    mostrarToast('⚠️ El campo Placas es obligatorio', 'warning');
+    document.getElementById('modal-vehiculo-placas').focus();
     return;
   }
   
   if (!datos.estado) {
-    mostrarToast('Por favor selecciona un estado', 'warning');
+    mostrarToast('⚠️ Por favor selecciona un estado', 'warning');
+    document.getElementById('modal-vehiculo-estado').focus();
     return;
   }
   
@@ -7813,19 +7877,23 @@ function guardarVehiculoFlotilla() {
   // Enviar al backend
   google.script.run
     .withSuccessHandler(function(resp) {
-      if (resp.ok) {
+      console.log('✅ Respuesta del servidor:', resp);
+      if (resp && resp.ok) {
         mostrarToast('✅ Vehículo guardado correctamente', 'success');
         // Cerrar modal
         var modal = bootstrap.Modal.getInstance(document.getElementById('modal-vehiculo-flotilla'));
         if (modal) modal.hide();
         // Recargar flotilla
-        cargarFlotilla();
+        setTimeout(function() {
+          cargarFlotilla();
+        }, 500);
       } else {
-        mostrarToast('Error: ' + resp.error, 'danger');
+        mostrarToast('❌ Error: ' + (resp.error || 'No se pudo guardar el vehículo'), 'danger');
       }
     })
     .withFailureHandler(function(err) {
-      mostrarToast('Error al guardar: ' + err.message, 'danger');
+      console.error('❌ Error al guardar:', err);
+      mostrarToast('❌ Error al guardar: ' + err.message, 'danger');
     })
     .guardarVehiculoFlotilla(datos);
 }
@@ -7984,22 +8052,33 @@ function cargarFlotilla() {
             // OBTENER EL GPS REAL de la columna GPS_ACTUAL
             var gpsActual = v.gateway || v.gpsActual || '—';
             
-html += `
-  <td>
-    <div class="btn-group btn-group-sm" role="group">
-      <button class="btn btn-outline-primary" 
-              onclick="mostrarFormEditarVehiculo('${v.economico}')"
-              title="Editar vehículo">
-        <i class="bi bi-pencil-square"></i>
-      </button>
-      <button class="btn btn-outline-secondary" 
-              onclick="abrirModalEstado('${v.economico}')"
-              title="Cambiar estado">
-        <i class="bi bi-tag"></i>
-      </button>
-    </div>
-  </td>
-`;
+            html += `
+              <tr>
+                <td><strong>${v.economico || '-'}</strong></td>
+                <td>${v.placas || '-'}</td>
+                <td>${v.tipoVehiculo || '-'}</td>
+                <td>${(v.marca || '')} ${(v.modelo || '')}</td>
+                <td><span class="${badgeClass}">${estadoNombre}</span></td>
+                <td>${v.tipoUnidad || '-'}</td>
+                <td>${gpsActual}</td>
+                <td>${v.camara || '-'}</td>
+                <td>${v.accesorios || '-'}</td>
+                <td>
+                  <div class="btn-group btn-group-sm" role="group">
+                    <button class="btn btn-outline-primary" 
+                            onclick="mostrarFormEditarVehiculo('${v.economico}')"
+                            title="Editar vehículo">
+                      <i class="bi bi-pencil-square"></i>
+                    </button>
+                    <button class="btn btn-outline-secondary" 
+                            onclick="abrirModalEstado('${v.economico}')"
+                            title="Cambiar estado">
+                      <i class="bi bi-tag"></i>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            `;
           });
           
           tbody.innerHTML = html;
@@ -8109,6 +8188,11 @@ function abrirModalEstado(economico) {
   modalInstance.show();
 }
 
+
+
+/**
+ * Cambia el estado del vehículo
+ */
 function cambiarEstadoVehiculo() {
   var selector = document.getElementById('selector-estado-flotilla');
   var estadoId = selector.value;
@@ -8133,90 +8217,6 @@ function cambiarEstadoVehiculo() {
   if (modalInstance) modalInstance.hide();
 }
 
-/**
- * Cambia el estado del vehículo
- */
-function cambiarEstadoVehiculo() {
-  var selector = document.getElementById('selector-estado-flotilla');
-  var estadoId = selector.value;
-  
-  if (!estadoId) {
-    mostrarToast('Por favor selecciona un estado', 'warning');
-    return;
-  }
-  
-  var modal = document.getElementById('modal-cambiar-estado');
-  var economico = modal.dataset.economico;
-  
-  if (!economico) {
-    mostrarToast('No se pudo identificar el vehículo', 'danger');
-    return;
-  }
-  
-  actualizarEstadoVehiculo(economico, estadoId);
-  
-  var modalInstance = bootstrap.Modal.getInstance(modal);
-  if (modalInstance) modalInstance.hide();
-}
-
-/**
- * Actualiza el estado de un vehículo
- */
-function actualizarEstadoVehiculo(economico, nuevoEstadoId) {
-  if (!economico || !nuevoEstadoId) {
-    mostrarToast('Datos incompletos', 'warning');
-    return;
-  }
-  
-  mostrarToast('🔄 Actualizando estado...', 'info');
-  
-  google.script.run
-    .withSuccessHandler(function(resp) {
-      if (!resp.ok) {
-        mostrarToast('Error: ' + resp.error, 'danger');
-        return;
-      }
-      
-      var vehiculo = resp.vehiculos.find(function(v) { 
-        return v.economico === economico; 
-      });
-      
-      if (!vehiculo) {
-        mostrarToast('Vehículo no encontrado', 'danger');
-        return;
-      }
-      
-      var datosActualizados = {
-        economico: vehiculo.economico,
-        placas: vehiculo.placas,
-        tipoVehiculo: vehiculo.tipoVehiculo,
-        marca: vehiculo.marca,
-        modelo: vehiculo.modelo,
-        año: vehiculo.año,
-        serieVehiculo: vehiculo.serieVehiculo || '',
-        estado: nuevoEstadoId,
-        tipoUnidad: vehiculo.tipoUnidad || ''
-      };
-      
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.ok) {
-            mostrarToast('✅ Estado actualizado correctamente', 'success');
-            cargarFlotilla();
-          } else {
-            mostrarToast('Error: ' + result.error, 'danger');
-          }
-        })
-        .withFailureHandler(function(err) {
-          mostrarToast('Error al actualizar: ' + err.message, 'danger');
-        })
-        .guardarVehiculoFlotilla(datosActualizados);
-    })
-    .withFailureHandler(function(err) {
-      mostrarToast('Error al obtener vehículo: ' + err.message, 'danger');
-    })
-    .obtenerFlotilla();
-}
 /**
  * Carga los tipos de unidad en el filtro de flotilla
  */
@@ -8717,69 +8717,6 @@ function renderEstadosEnSelector(selectorId, estados) {
   console.log('✅ Selector cargado con ' + estados.length + ' estados');
 }
 
-/**
- * Actualiza el estado de un vehículo en el backend
- */
-/**
- * Actualiza el estado de un vehículo en el backend
- */
-function actualizarEstadoVehiculo(economico, nuevoEstadoId) {
-  if (!economico || !nuevoEstadoId) {
-    mostrarToast('Datos incompletos para actualizar estado', 'warning');
-    return;
-  }
-  
-  mostrarToast('🔄 Actualizando estado del vehículo...', 'info');
-  
-  // Primero obtener los datos actuales del vehículo
-  google.script.run
-    .withSuccessHandler(function(resp) {
-      if (!resp.ok) {
-        mostrarToast('Error: ' + resp.error, 'danger');
-        return;
-      }
-      
-      // Encontrar el vehículo específico
-      var vehiculo = resp.vehiculos.find(function(v) { return v.economico === economico; });
-      if (!vehiculo) {
-        mostrarToast('Vehículo no encontrado', 'danger');
-        return;
-      }
-      
-      // Actualizar solo el estado
-      var datosActualizados = {
-        economico: vehiculo.economico,
-        placas: vehiculo.placas,
-        tipoVehiculo: vehiculo.tipoVehiculo,
-        marca: vehiculo.marca,
-        modelo: vehiculo.modelo,
-        año: vehiculo.año,
-        serieVehiculo: vehiculo.serieVehiculo || '',
-        estado: nuevoEstadoId,
-        tipoUnidad: vehiculo.tipoUnidad || ''
-      };
-      
-      // Guardar con el nuevo estado
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.ok) {
-            mostrarToast('✅ Estado actualizado correctamente', 'success');
-            // Recargar la tabla
-            cargarFlotilla();
-          } else {
-            mostrarToast('Error: ' + result.error, 'danger');
-          }
-        })
-        .withFailureHandler(function(err) {
-          mostrarToast('Error al actualizar: ' + err.message, 'danger');
-        })
-        .guardarVehiculoFlotilla(datosActualizados);
-    })
-    .withFailureHandler(function(err) {
-      mostrarToast('Error al obtener vehículo: ' + err.message, 'danger');
-    })
-    .obtenerFlotilla();
-}
 
 // ============================================================
 // SOBREESCRIBIR cargarFlotilla PARA QUE USE ESTADOS
@@ -8883,5 +8820,122 @@ function actualizarResumenFlotilla(vehiculos) {
   } catch (e) {
     console.warn('⚠️ Error al actualizar resumen:', e);
   }
+}
+/**
+ * Renderiza el modal para agregar/editar vehículos
+ */
+function renderizarModal() {
+  console.log('✅ Renderizando modal de vehículo...');
+  
+  var tiposUnidad = window._tiposUnidadTemp || ['UNIDAD', 'UTILITARIA', 'CAJA SECA', 'MÓVIL', 'DOLLY', 'REMOLQUE'];
+  var tiposVehiculo = window._tiposVehiculoTemp || ['UTILITARIA', 'CAMION', 'VAN', 'PICKUP', 'AUTOMOVIL', 'TRACTOCAMION', 'REMOLQUE'];
+  var estados = window._estadosTemp || [];
+  
+  if (estados.length === 0) {
+    estados = [
+      { id: '1', nombre: 'Activo', color: 'success', activo: true },
+      { id: '2', nombre: 'Inactivo', color: 'danger', activo: true },
+      { id: '3', nombre: 'En Mantenimiento', color: 'warning', activo: true },
+      { id: '4', nombre: 'Siniestrada', color: 'dark', activo: true }
+    ];
+  }
+  
+  // Construir el HTML del modal
+  var modalHtml = `
+    <div class="modal fade" id="modal-vehiculo-flotilla" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">
+              <i class="bi bi-truck me-2"></i>
+              <span id="modal-vehiculo-titulo">Agregar Vehículo</span>
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <form id="form-vehiculo-flotilla">
+              <div class="row g-3">
+                <div class="col-12 col-md-6">
+                  <label class="form-label required">Económico</label>
+                  <input type="text" id="modal-vehiculo-economico" class="form-control" placeholder="Ej: G-361" required>
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label required">Placas</label>
+                  <input type="text" id="modal-vehiculo-placas" class="form-control" placeholder="Ej: ABC-123-X" required>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Tipo de Vehículo</label>
+                  <select id="modal-vehiculo-tipo" class="form-select">
+                    <option value="">Seleccionar...</option>
+                    ${tiposVehiculo.map(function(t) {
+                      return `<option value="${t}">${t}</option>`;
+                    }).join('')}
+                  </select>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Marca</label>
+                  <input type="text" id="modal-vehiculo-marca" class="form-control" placeholder="Ej: Ford">
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Modelo</label>
+                  <input type="text" id="modal-vehiculo-modelo" class="form-control" placeholder="Ej: F-350">
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Año</label>
+                  <input type="number" id="modal-vehiculo-ano" class="form-control" placeholder="2024" min="1990" max="2025">
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Tipo de Unidad</label>
+                  <select id="modal-vehiculo-tipo-unidad" class="form-select">
+                    <option value="">Seleccionar...</option>
+                    ${tiposUnidad.map(function(t) {
+                      return `<option value="${t}">${t}</option>`;
+                    }).join('')}
+                  </select>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label required">Estado</label>
+                  <select id="modal-vehiculo-estado" class="form-select" required>
+                    <option value="">Seleccionar estado...</option>
+                    ${estados.map(function(e) {
+                      var id = e.id || e;
+                      var nombre = e.nombre || e;
+                      var selected = nombre === 'Activo' ? 'selected' : '';
+                      var style = e.color ? `style="border-left: 4px solid var(--bs-${e.color}); padding-left: 8px;"` : '';
+                      return `<option value="${id}" ${selected} ${style}>${nombre}</option>`;
+                    }).join('')}
+                  </select>
+                </div>
+                <div class="col-12">
+                  <label class="form-label">Serie del Vehículo (VIN)</label>
+                  <input type="text" id="modal-vehiculo-serie" class="form-control" placeholder="Ej: 1FT8W3BT9PED12345" oninput="this.value=this.value.toUpperCase()">
+                </div>
+                <input type="hidden" id="modal-vehiculo-editando" value="false">
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+              <i class="bi bi-x me-1"></i>Cancelar
+            </button>
+            <button type="button" class="btn btn-primary" onclick="guardarVehiculoFlotilla()">
+              <i class="bi bi-check me-1"></i>Guardar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  // Remover modal anterior si existe
+  var modalExistente = document.getElementById('modal-vehiculo-flotilla');
+  if (modalExistente) modalExistente.remove();
+  
+  // Agregar modal al DOM
+  var div = document.createElement('div');
+  div.innerHTML = modalHtml;
+  document.body.appendChild(div);
+  
+  console.log('✅ Modal de vehículo renderizado correctamente');
 }
 </script>
