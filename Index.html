@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fleet Manager · Samsara</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <!-- Tesseract.js para OCR en el cliente -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+  <?!= include('Estilos'); ?>
+</head>
+
+<body>
+
+  <!-- ══════════════════════════════════════════
+     PANTALLA DE LOGIN
+══════════════════════════════════════════ -->
+
+  <div id="pantalla-login" class="login-wrapper">
+    <div class="login-card">
+      <div class="login-logo">
+        <i class="bi bi-truck"></i>
+        <span>Fleet Manager</span>
+      </div>
+      <p class="login-subtitle">Sistema de Gestión de Flotas · Samsara</p>
+      <div id="db-status-container" class="mb-3"></div>
+      <div id="login-error" class="alert alert-danger d-none" role="alert"></div>
+
+      <div class="mb-3">
+        <label class="form-label">Usuario</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-person"></i></span>
+          <input type="text" id="inp-user" class="form-control" placeholder="tu.usuario"
+               autocomplete="username" autofocus>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <label class="form-label">Contraseña</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-lock"></i></span>
+          <input type="password" id="inp-pass" class="form-control" placeholder="••••••••"
+               autocomplete="current-password">
+          <button class="btn btn-outline-secondary" type="button" onclick="togglePass()">
+          <i class="bi bi-eye" id="ico-eye"></i>
+        </button>
+        </div>
+      </div>
+
+      <button class="btn btn-primary w-100 btn-lg" id="btn-login" onclick="doLogin()">
+      <span id="login-spinner" class="spinner-border spinner-border-sm d-none me-2"></span>
+      Ingresar
+    </button>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════
+     APP PRINCIPAL (oculta hasta login)
+══════════════════════════════════════════ -->
+  <div id="pantalla-app" class="d-none">
+
+    <!-- NAVBAR -->
+    <nav class="navbar navbar-dark fm-navbar">
+      <div class="container-fluid">
+        <span class="navbar-brand">
+        <i class="bi bi-truck me-2"></i>Fleet Manager
+      </span>
+        <div class="d-flex align-items-center gap-2">
+          <span class="badge fm-badge-rol" id="badge-rol"></span>
+          <span class="text-white-50 d-none d-md-inline" id="nav-nombre"></span>
+          <button class="btn btn-sm btn-outline-light" onclick="doLogout()">
+          <i class="bi bi-box-arrow-right"></i>
+          <span class="d-none d-md-inline ms-1">Salir</span>
+        </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- LAYOUT PRINCIPAL -->
+    <div class="fm-layout">
+
+      <!-- SIDEBAR (escritorio) / Bottom nav (móvil) -->
+      <aside class="fm-sidebar" id="sidebar">
+        <nav class="fm-sidenav">
+          <a class="fm-navitem active" data-panel="panel-dashboard" onclick="mostrarPanel(this)">
+            <i class="bi bi-speedometer2"></i><span>Dashboard</span>
+          </a>
+          <a class="fm-navitem active" data-panel="panel-nuevo" onclick="mostrarPanel(this)">
+            <i class="bi bi-plus-circle"></i><span>Nuevo reporte</span>
+          </a>
+          <a class="fm-navitem" data-panel="panel-borradores" onclick="mostrarPanel(this)">
+            <i class="bi bi-pencil-square"></i><span>Mis Borradores</span>
+          </a>
+          <a class="fm-navitem" data-panel="panel-mis-registros" onclick="mostrarPanel(this)">
+            <i class="bi bi-file-earmark-text"></i><span>Mis Registros</span>
+          </a>
+          <a class="fm-navitem" data-panel="panel-tickets" onclick="mostrarPanel(this)">
+            <i class="bi bi-ticket-perforated"></i><span>Tickets</span>
+          </a>
+          <a class="fm-navitem d-none" id="nav-registros" data-panel="panel-registros" onclick="mostrarPanel(this)">
+            <i class="bi bi-table"></i><span>Registros</span>
+          </a>
+          <a class="fm-navitem d-none" id="nav-inventario" data-panel="panel-inventario" onclick="mostrarPanel(this)">
+            <i class="bi bi-box-seam"></i><span>Inventario GPS</span>
+          </a>
+          <a class="fm-navitem" data-panel="panel-historial" onclick="mostrarPanel(this)">
+            <i class="bi bi-clock-history"></i><span>Mi historial</span>
+          </a>
+          <a class="fm-navitem d-none" id="nav-flotilla" data-panel="panel-flotilla" onclick="mostrarPanel(this)">
+            <i class="bi bi-truck"></i><span>Flotilla</span>
+          </a>
+        </nav>
+      </aside>
+
+      <!-- CONTENIDO PRINCIPAL -->
+      <main class="fm-main">
+
+        <!-- ─── PANEL: NUEVO REPORTE ─── -->
+        <div id="panel-nuevo" class="fm-panel">
+          <div class="fm-panel-header">
+            <h2><i class="bi bi-file-earmark-plus me-2"></i>Nueva Orden de Servicio</h2>
+            <span class="folio-badge d-none" id="folio-preview"></span>
+          </div>
+
+          <div id="form-error" class="alert alert-danger d-none"></div>
+          <div id="form-success" class="alert alert-success d-none"></div>
+
+          <form id="form-reporte" novalidate>
+
+            <!-- ======================================== -->
+            <!-- 1. DATOS DEL VEHÍCULO                    -->
+            <!-- ======================================== -->
+            <div class="fm-section-title">
+              <i class="bi bi-truck"></i> Datos del vehículo
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-md-4">
+                <label class="form-label required">Económico</label>
+                <div class="input-group">
+                  <span class="input-group-text"><i class="bi bi-hash"></i></span>
+                  <input type="text" id="inp-economico" class="form-control"
+                    placeholder="ECO-342" required
+                    onblur="autocompletarDispositivos()"
+                    ninput="this.value=this.value.toUpperCase()">
+                </div>
+                <div id="autocompletar-status" class="small text-muted mt-1" style="display:none;">
+                  <i class="bi bi-arrow-repeat spinner-border spinner-border-sm me-1"></i>
+                  Buscando dispositivos...
+                </div>
+              </div>
+              <div class="col-12 col-md-4">
+                <label class="form-label required">Placas</label>
+                <input type="text" id="inp-placas" class="form-control"
+               placeholder="ABC-123-X" required>
+              </div>
+              <!-- FECHA DEL SERVICIO -->
+              <div class="col-12 col-md-4">
+                <label class="form-label required">Fecha del servicio</label>
+                <input type="date" id="inp-fecha" class="form-control" onchange="verificarDiscrepanciaFechas()">
+                <div id="fecha-advertencia" class="small text-warning mt-1" style="display:none;">
+                  <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                  <span id="fecha-mensaje"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- ======================================== -->
+            <!-- DISPOSITIVOS INSTALADOS                 -->
+            <!-- ======================================== -->
+            <div class="fm-section-title mt-2">
+              <i class="bi bi-device-hdd"></i> Dispositivos instalados
+            </div>
+
+            <div class="row g-3 mb-3">
+              <!-- Gateway -->
+              <div class="col-12 col-md-6">
+                <label class="form-label required">📡 Gateway</label>
+                <div class="row g-1">
+                  <div class="col-6">
+                    <select id="tipo-gateway" class="form-select form-select-sm">
+                      <option value="">Selecciona tipo...</option>
+                      <!-- Se llena dinámicamente desde 📋_Tipos_Equipo -->
+                    </select>
+                  </div>
+                  <div class="col-6">
+                    <div class="input-group">
+                      <span class="input-group-text"><i class="bi bi-upc-scan"></i></span>
+                      <input type="text" id="serie-gateway" class="form-control form-control-sm"
+                        placeholder="Serie del Gateway"
+                        oninput="this.value=this.value.toUpperCase(); validarYAutocompletarTipo(this.value, 'gateway')">
+                      <button class="btn btn-outline-secondary btn-sm" type="button" onclick="abrirCamaraTesseract('serie-gateway')" title="Escanear">
+                        <i class="bi bi-camera"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Cámara -->
+              <div class="col-12 col-md-6">
+                <label class="form-label">📷 Cámara</label>
+                <div class="row g-1">
+                  <div class="col-6">
+                    <select id="tipo-camara" class="form-select form-select-sm">
+                      <option value="">Selecciona tipo...</option>
+                      <!-- Se llena dinámicamente desde 📋_Tipos_Equipo -->
+                    </select>
+                  </div>
+                  <div class="col-6">
+                    <div class="input-group">
+                      <span class="input-group-text"><i class="bi bi-upc-scan"></i></span>
+                      <input type="text" id="serie-camara" class="form-control form-control-sm"
+                        placeholder="Serie de la cámara"
+                        oninput="this.value=this.value.toUpperCase(); validarYAutocompletarTipo(this.value, 'camara')">
+                      <button class="btn btn-outline-secondary btn-sm" type="button" onclick="abrirCamaraTesseract('serie-camara')" title="Escanear">
+                        <i class="bi bi-camera"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Contenedor para resultado del OCR -->
+              <div id="ocr-resultado" class="mt-2" style="display:none;">
+                <div class="alert alert-info small" style="margin-bottom:0;">
+                  <div id="ocr-progreso" style="display:none;">
+                    <div class="d-flex align-items-center">
+                      <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                      <span id="ocr-estado">Procesando imagen...</span>
+                    </div>
+                    <div class="progress mt-2" style="height:4px;">
+                      <div id="ocr-progress-bar" class="progress-bar" role="progressbar" style="width:0%"></div>
+                    </div>
+                  </div>
+                  <div id="ocr-resultado-texto" style="display:none;">
+                    <strong>📷 Código detectado:</strong> <span id="ocr-texto-detectado"></span>
+                    <br>
+                    <button class="btn btn-success btn-sm mt-1" type="button" onclick="confirmarOCR()">
+                      <i class="bi bi-check me-1"></i>Usar este código
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm mt-1" type="button" onclick="cancelarOCR()">
+                      <i class="bi bi-x me-1"></i>Cancelar
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm mt-1" type="button" onclick="reintentarOCR()">
+                      <i class="bi bi-arrow-repeat me-1"></i>Reintentar
+                    </button>
+                  </div>
+                  <div id="ocr-error" class="text-danger" style="display:none;"></div>
+                </div>
+              </div>
+              <!-- Accesorios con tipo -->
+              <div class="col-12">
+                <label class="form-label">Accesorios</label>
+                <div id="accesorios-container">
+                  <!-- Se llena dinámicamente desde 📋_Tipos_Equipo -->
+                </div>
+              </div>
+
+              <!-- Plataforma -->
+              <div class="col-12 col-md-3">
+                <label class="form-label">Plataforma</label>
+                <input type="text" id="inp-plataforma" class="form-control" value="SAMSARA" readonly>
+              </div>
+            </div>
+
+
+            <!-- ======================================== -->
+            <!-- TIPO DE SERVICIO                         -->
+            <!-- ======================================== -->
+            <div class="fm-section-title mt-2">
+              <i class="bi bi-tools"></i> Tipo de servicio
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-md-6">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="tipoServicio" id="tipo-instalacion" value="instalacion" checked>
+                  <label class="form-check-label" for="tipo-instalacion">
+                  <i class="bi bi-plug"></i> Instalación Completa de GPS
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="tipoServicio" id="tipo-desinstalacion" value="desinstalacion">
+                  <label class="form-check-label" for="tipo-desinstalacion">
+                  <i class="bi bi-plug-fill"></i> Desinstalación de GPS
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="tipoServicio" id="tipo-revision" value="revision">
+                  <label class="form-check-label" for="tipo-revision">
+                  <i class="bi bi-search"></i> Revisión / Diagnóstico
+                  </label>
+                </div>
+              </div>
+            </div>
+            <!-- ======================================== -->
+            <!-- 3. DETALLE DEL TRABAJO                   -->
+            <!-- ======================================== -->
+            <div class="fm-section-title mt-2">
+              <i class="bi bi-card-text"></i> Detalle del trabajo
+            </div>
+            <div class="mb-3">
+              <textarea id="inp-detalle" class="form-control" rows="4" required
+                placeholder="Describe el trabajo realizado, condiciones del vehículo, observaciones relevantes..."></textarea>
+              <div class="form-text">Mínimo 20 caracteres. Este campo es editable por el Revisor.</div>
+            </div>
+
+            <!-- ======================================== -->
+            <!-- 4. EVIDENCIA FOTOGRÁFICA                 -->
+            <!-- ======================================== -->
+            <div class="fm-section-title mt-2">
+              <i class="bi bi-images"></i> Evidencia fotográfica
+            </div>
+
+            <!-- Zona de carga drag & drop -->
+            <div class="fm-dropzone" id="dropzone" ondragover="event.preventDefault(); this.classList.add('dragover')"
+              ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event)">
+              <i class="bi bi-cloud-upload fm-drop-icon"></i>
+              <p class="mb-1">Arrastra fotos aquí o <strong>toca para seleccionar</strong></p>
+              <p class="text-muted small mb-2">Exterior · Cableado · Odómetro · GPS · Evidencia general</p>
+              <input type="file" id="inp-fotos" accept="image/*" multiple
+             class="d-none" onchange="previewFotos(this.files)">
+              <button type="button" class="btn btn-outline-primary btn-sm"
+              onclick="document.getElementById('inp-fotos').click()">
+              <i class="bi bi-folder2-open me-1"></i>Seleccionar fotos
+              </button>
+            </div>
+
+            <!-- Grid de previews -->
+            <div class="fm-foto-grid mt-3" id="foto-grid"></div>
+
+            <!-- Barra de progreso upload -->
+            <div class="progress mt-3 d-none" id="upload-progress">
+              <div class="progress-bar progress-bar-striped progress-bar-animated" id="upload-bar" role="progressbar"
+                style="width: 0%"></div>
+            </div>
+
+            <!-- ======================================== -->
+            <!-- 5. GUARDAR COMO BORRADOR (FUERA DEL DROPZONE) -->
+            <!-- ======================================== -->
+            <div class="form-check mt-3">
+              <input class="form-check-input" type="checkbox" id="chk-borrador">
+              <label class="form-check-label" for="chk-borrador">
+              <i class="bi bi-pencil-square me-1"></i>
+              Guardar como borrador
+              </label>
+              <span class="text-muted small d-block ms-4">
+                El equipo GPS quedará apartado y podrás continuar después desde una computadora.
+              </span>
+            </div>
+            <!-- ======================================== -->
+            <!-- 6. BOTONES                               -->
+            <!-- ======================================== -->
+            <div class="d-flex justify-content-end gap-2 mt-4">
+              <button type="button" class="btn btn-outline-secondary" onclick="resetForm()">
+        <i class="bi bi-x-circle me-1"></i>Limpiar
+      </button>
+              <button type="button" class="btn btn-primary btn-lg px-4" id="btn-enviar" onclick="enviarReporteConUbicacion()">
+        <span id="enviar-spinner" class="spinner-border spinner-border-sm d-none me-2"></span>
+        <i class="bi bi-send-check me-1" id="enviar-ico"></i>Enviar reporte
+      </button>
+            </div>
+
+          </form>
+        </div><!-- /panel-nuevo -->
+        <!-- ─── PANEL: DASHBOARD ─── -->
+        <div id="panel-dashboard" class="fm-panel d-none">
+          <div class="fm-panel-header">
+            <h2><i class="bi bi-speedometer2 me-2"></i>Dashboard</h2>
+            <span class="text-muted small" id="dashboard-fecha"></span>
+          </div>
+          <div id="dashboard-content">
+            <div class="text-center text-muted py-5">
+              <div class="spinner-border" role="status"></div>
+              <p class="mt-2">Cargando dashboard...</p>
+            </div>
+          </div>
+        </div>
+        <!-- ─── PANEL: REGISTROS (Revisor/Admin) ─── -->
+        <div id="panel-registros" class="fm-panel d-none">
+          <div class="fm-panel-header">
+            <h2><i class="bi bi-table me-2"></i>Registros y aprobaciones</h2>
+          </div>
+
+          <!-- Filtros -->
+          <div class="fm-filtros">
+            <div class="row g-2 align-items-end">
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Estado</label>
+                <select id="fil-estado" class="form-select form-select-sm" onchange="cargarRegistros()">
+                <option value="">Todos</option>
+                <option value="Borrador">Borrador</option>
+                <option value="En revisión">En revisión</option>
+                <option value="Aprobado">Aprobado</option>
+                <option value="Pagado">Pagado</option>
+              </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Técnico</label>
+                <select id="fil-tecnico" class="form-select form-select-sm" onchange="cargarRegistros()">
+                <option value="">Todos</option>
+              </select>
+              </div>
+              <div class="col-6 col-md-2">
+                <label class="form-label small">Desde</label>
+                <input type="date" id="fil-desde" class="form-control form-control-sm"
+                     onchange="cargarRegistros()">
+              </div>
+              <div class="col-6 col-md-2">
+                <label class="form-label small">Hasta</label>
+                <input type="date" id="fil-hasta" class="form-control form-control-sm"
+                     onchange="cargarRegistros()">
+              </div>
+              <div class="col-12 col-md-2">
+                <button class="btn btn-sm btn-outline-secondary w-100"
+                      onclick="limpiarFiltros()">
+                <i class="bi bi-funnel me-1"></i>Limpiar
+              </button>
+              </div>
+            </div>
+          </div>
+          <!-- Tabla de registros (escritorio) -->
+          <div class="table-responsive d-none d-md-block mt-3">
+            <table class="table table-hover fm-tabla">
+              <thead>
+                <tr>
+                  <th>Folio</th>
+                  <th>Fecha</th>
+                  <th>Económico</th>
+                  <th>Tipo</th>
+                  <th>Técnico</th>
+                  <th>$</th>
+                  <th>Estado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="tabla-body"></tbody>
+            </table>
+          </div>
+          <!-- Cards (móvil) -->
+          <div class="d-md-none mt-3" id="cards-registros"></div>
+
+          <div id="registros-vacio" class="fm-empty d-none">
+            <i class="bi bi-inbox"></i>
+            <p>No hay registros con los filtros seleccionados.</p>
+          </div>
+        </div><!-- /panel-registros -->
+
+
+        <!-- ─── PANEL: INVENTARIO GPS ─── -->
+        <div id="panel-inventario" class="fm-panel d-none">
+          <div class="fm-panel-header">
+            <h2><i class="bi bi-box-seam me-2"></i>Inventario GPS</h2>
+            <div class="d-flex gap-2">
+              <!-- Botón Agregar vehículo (solo Admin/Revisor) -->
+              <button class="btn btn-sm btn-info d-none" id="btn-agregar-vehiculo" onclick="mostrarFormAgregarVehiculo()">
+                <i class="bi bi-truck me-1"></i>Agregar vehículo
+              </button>
+              <!-- Botón Exportar Excel (solo Revisor/Admin) -->
+              <button class="btn btn-sm btn-success d-none" id="btn-exportar-excel" onclick="exportarInventarioExcel()">
+                <i class="bi bi-file-earmark-excel me-1"></i>Exportar Excel
+              </button>
+              <button class="btn btn-sm btn-info d-none" id="btn-reporte-unidades" onclick="exportarReporteUnidades()">
+                <i class="bi bi-file-earmark-text me-1"></i>Reporte Unidades
+              </button>
+              <button class="btn btn-sm btn-secondary d-none" id="btn-admin-tipos" onclick="abrirAdminTiposUnidad()">
+                <i class="bi bi-tags me-1"></i>Tipos de Unidad
+              </button>
+              <!-- Botón Agregar equipo (solo Admin) -->
+              <button class="btn btn-sm btn-primary d-none" id="btn-agregar-equipo" onclick="mostrarFormAgregarEquipo()">
+                <i class="bi bi-plus-circle me-1"></i>Agregar
+              </button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="cargarInventario()">
+                <i class="bi bi-arrow-repeat me-1"></i>Actualizar
+              </button>
+            </div>
+          </div>
+          <!-- 📊 RESUMEN DE ESTADOS -->
+          <div class="row g-2 mb-3" id="inventario-resumen">
+            <div class="col-6 col-md-3">
+              <div class="card text-center p-2" style="border-left:4px solid #28a745;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="inv-disponibles">0</div>
+                  <small class="text-muted">🟢 Disponibles</small>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="card text-center p-2" style="border-left:4px solid #0d6efd;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="inv-instalados">0</div>
+                  <small class="text-muted">🔵 Instalados</small>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="card text-center p-2" style="border-left:4px solid #ffc107;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="inv-garantia">0</div>
+                  <small class="text-muted">🟡 Garantía</small>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="card text-center p-2" style="border-left:4px solid #dc3545;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="inv-baja">0</div>
+                  <small class="text-muted">🔴 Baja</small>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- ─── DASHBOARD DE INVENTARIO ─── -->
+          <div class="mb-3" id="dashboard-container">
+            <div class="row g-2">
+              <!-- Columna 1: Resumen de equipos -->
+              <div class="col-12 col-md-6">
+                <div class="card">
+                  <div class="card-header bg-primary text-white py-1">
+                    <small><i class="bi bi-box-seam me-1"></i>📊 Resumen de Equipos</small>
+                  </div>
+                  <div class="card-body p-2" id="dashboard-equipos">
+                    <div class="text-muted small">Cargando estadísticas...</div>
+                  </div>
+                </div>
+              </div>
+              <!-- Columna 2: Resumen de vehículos -->
+              <div class="col-12 col-md-6">
+                <div class="card">
+                  <div class="card-header bg-success text-white py-1">
+                    <small><i class="bi bi-truck me-1"></i>🚗 Resumen de Vehículos</small>
+                  </div>
+                  <div class="card-body p-2" id="dashboard-vehiculos">
+                    <div class="text-muted small">Cargando estadísticas...</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- 🔍 FILTROS -->
+          <div class="fm-filtros mb-3">
+            <div class="row g-2 align-items-end">
+              <div class="col-6 col-md-2">
+                <label class="form-label small">Estado</label>
+                <select id="fil-inv-estado" class="form-select form-select-sm" onchange="cargarInventario()">
+                  <option value="">Todos</option>
+                  <option value="Disponible">🟢 Disponible</option>
+                  <option value="Instalado">🔵 Instalado</option>
+                  <option value="Garantía">🟡 Garantía</option>
+                  <option value="Baja">🔴 Baja</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-2">
+                <label class="form-label small">Tipo</label>
+                <select id="fil-inv-tipo" class="form-select form-select-sm" onchange="cargarInventario()">
+                  <option value="">Todos</option>
+                  <option value="VG">📡 Gateway</option>
+                  <option value="CM">📷 Cámara</option>
+                </select>
+              </div>
+              <!-- ✅ NUEVO FILTRO: TIPO DE UNIDAD -->
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Tipo de Unidad</label>
+                <select id="fil-inv-tipo-unidad" class="form-select form-select-sm" onchange="cargarInventario()">
+                <option value="">Todos</option>
+                <!-- Se llena dinámicamente desde el catálogo -->
+            </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Buscar</label>
+                <input type="text" id="fil-inv-buscar" class="form-control form-control-sm"
+             placeholder="Serie o económico..." oninput="cargarInventario()">
+              </div>
+              <div class="col-6 col-md-2">
+                <button class="btn btn-sm btn-outline-secondary w-100" onclick="limpiarFiltrosInventario()">
+        <i class="bi bi-funnel me-1"></i>Limpiar filtros
+      </button>
+              </div>
+            </div>
+          </div>
+
+
+          <!-- 📋 TABLA DE INVENTARIO -->
+          <div class="table-responsive">
+            <table class="table table-hover fm-tabla" id="tabla-inventario">
+              <thead>
+                <tr>
+                  <th>Serie</th>
+                  <th>Modelo</th>
+                  <th>Tipo</th>
+                  <th>IMEI</th>
+                  <th>Estado</th>
+                  <th>Económico</th>
+                  <th>Fecha Instalación</th>
+                  <th>Tipo Unidad</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="inventario-body">
+                <tr>
+                  <td colspan="9" class="text-center text-muted py-3">Cargando inventario...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Total de equipos -->
+          <div class="mt-2 text-muted small d-flex justify-content-between">
+            <span id="inv-total">Total: 0 equipos</span>
+            <span id="inv-filtrados" class="d-none">Mostrando: 0</span>
+          </div>
+        </div>
+        <!-- ─── PANEL: FLOTILLA ─── -->
+        <div id="panel-flotilla" class="fm-panel d-none">
+          <div class="fm-panel-header">
+            <h2><i class="bi bi-truck me-2"></i>🚚 Flotilla</h2>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-info d-none" id="btn-agregar-vehiculo-flotilla" onclick="mostrarFormAgregarVehiculo()">
+        <i class="bi bi-plus-circle me-1"></i>Agregar vehículo
+      </button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="cargarFlotilla()">
+        <i class="bi bi-arrow-repeat me-1"></i>Actualizar
+      </button>
+            </div>
+          </div>
+
+          <!-- 📊 Resumen -->
+          <div class="row g-2 mb-3" id="flotilla-resumen">
+            <div class="col-6 col-md-2">
+              <div class="card text-center p-2" style="border-left:4px solid #0d6efd;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="flotilla-total">0</div>
+                  <small class="text-muted">📋 Total</small>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-2">
+              <div class="card text-center p-2" style="border-left:4px solid #198754;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="flotilla-activos">0</div>
+                  <small class="text-muted">🟢 Activos</small>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-2">
+              <div class="card text-center p-2" style="border-left:4px solid #dc3545;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="flotilla-inactivos">0</div>
+                  <small class="text-muted">🔴 Inactivos</small>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="card text-center p-2" style="border-left:4px solid #0d6efd;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="flotilla-con-equipos">0</div>
+                  <small class="text-muted">📡 Con equipos</small>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="card text-center p-2" style="border-left:4px solid #ffc107;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="flotilla-sin-equipos">0</div>
+                  <small class="text-muted">⚠️ Sin equipos</small>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 🔍 Filtros -->
+          <div class="fm-filtros mb-3">
+            <div class="row g-2 align-items-end">
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Estado</label>
+                <select id="fil-flotilla-estado" class="form-select form-select-sm" onchange="cargarFlotilla()">
+          <option value="">Todos</option>
+          <option value="Activo">🟢 Activo</option>
+          <option value="Inactivo">🔴 Inactivo</option>
+        </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Tipo Unidad</label>
+                <select id="fil-flotilla-tipo-unidad" class="form-select form-select-sm" onchange="cargarFlotilla()">
+          <option value="">Todos</option>
+        </select>
+              </div>
+              <div class="col-6 col-md-4">
+                <label class="form-label small">Buscar</label>
+                <input type="text" id="fil-flotilla-buscar" class="form-control form-control-sm"
+               placeholder="Económico o placas..." oninput="cargarFlotilla()">
+              </div>
+              <div class="col-6 col-md-2">
+                <button class="btn btn-sm btn-outline-secondary w-100" onclick="limpiarFiltrosFlotilla()">
+          <i class="bi bi-funnel me-1"></i>Limpiar filtros
+        </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 📋 Tabla de flotilla -->
+          <div class="table-responsive">
+            <table class="table table-hover fm-tabla" id="tabla-flotilla">
+              <thead>
+                <tr>
+                  <th>Económico</th>
+                  <th>Placas</th>
+                  <th>Tipo</th>
+                  <th>Marca/Modelo</th>
+                  <th>Estado</th>
+                  <th>Tipo Unidad</th>
+                  <th>📡 Gateway</th>
+                  <th>📷 Cámara</th>
+                  <th>🔧 Accesorios</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="flotilla-body">
+                <tr>
+                  <td colspan="10" class="text-center text-muted py-3">Cargando flotilla...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Total -->
+          <div class="mt-2 text-muted small" id="flotilla-total-text">Total: 0 vehículos</div>
+        </div><!-- /panel-flotilla -->
+        <!-- ─── PANEL: MIS BORRADORES ─── -->
+        <div id="panel-borradores" class="fm-panel d-none">
+          <div class="fm-panel-header">
+            <h2><i class="bi bi-pencil-square me-2"></i>Mis Borradores</h2>
+            <button class="btn btn-outline-secondary btn-sm" onclick="cargarBorradores()">
+              <i class="bi bi-arrow-repeat me-1"></i>Actualizar
+            </button>
+          </div>
+          <p class="text-muted small">Borradores guardados que aún no han sido enviados a revisión.</p>
+          <div id="borradores-cards" class="mt-3"></div>
+          <div id="borradores-vacio" class="fm-empty d-none">
+            <i class="bi bi-inbox"></i>
+            <p>No tienes borradores guardados.</p>
+          </div>
+        </div>
+        <!-- ─── PANEL: MIS REGISTROS (TÉCNICO - SOLO LECTURA) ─── -->
+        <div id="panel-mis-registros" class="fm-panel d-none">
+          <div class="fm-panel-header">
+            <h2><i class="bi bi-file-earmark-text me-2"></i>Mis Registros</h2>
+            <button class="btn btn-outline-secondary btn-sm" onclick="cargarMisRegistros()">
+                <i class="bi bi-arrow-repeat me-1"></i>Actualizar
+              </button>
+          </div>
+          <p class="text-muted small">Todos tus reportes enviados. Solo visualización.</p>
+
+          <!-- Filtros -->
+          <div class="row g-2 mb-3">
+            <div class="col-6 col-md-4">
+              <label class="form-label small">Estado</label>
+              <select id="fil-mis-estado" class="form-select form-select-sm" onchange="cargarMisRegistros()">
+                <option value="">Todos</option>
+                <option value="Borrador">Borrador</option>
+                <option value="Listo para pago">Listo para pago</option>
+                <option value="Aprobado">Aprobado</option>
+                <option value="Pagado">Pagado</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label small">Desde</label>
+              <input type="date" id="fil-mis-desde" class="form-control form-control-sm" onchange="cargarMisRegistros()">
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label small">Hasta</label>
+              <input type="date" id="fil-mis-hasta" class="form-control form-control-sm" onchange="cargarMisRegistros()">
+            </div>
+          </div>
+
+          <!-- Vista de tarjetas -->
+          <div id="mis-registros-cards" class="mt-3"></div>
+          <div id="mis-registros-vacio" class="fm-empty d-none">
+            <i class="bi bi-inbox"></i>
+            <p>No tienes reportes registrados.</p>
+          </div>
+        </div>
+        <!-- ─── PANEL: TICKETS ─── -->
+        <div id="panel-tickets" class="fm-panel d-none">
+          <div class="fm-panel-header">
+            <h2><i class="bi bi-ticket-perforated me-2"></i>🎫 Tickets de fallas</h2>
+            <div class="d-flex gap-2">
+              <button class="btn btn-primary btn-sm" onclick="mostrarFormNuevoTicket()">
+        <i class="bi bi-plus-circle me-1"></i>Nuevo ticket
+      </button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="cargarTickets()">
+        <i class="bi bi-arrow-repeat me-1"></i>Actualizar
+      </button>
+            </div>
+          </div>
+
+          <!-- 📊 Resumen de tickets -->
+          <div class="row g-2 mb-3">
+            <div class="col-4 col-md-2">
+              <div class="card text-center p-2" style="border-left:4px solid #ffc107;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="tickets-pendientes">0</div>
+                  <small class="text-muted">⏳ Pendientes</small>
+                </div>
+              </div>
+            </div>
+            <div class="col-4 col-md-2">
+              <div class="card text-center p-2" style="border-left:4px solid #0d6efd;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="tickets-proceso">0</div>
+                  <small class="text-muted">🔄 En proceso</small>
+                </div>
+              </div>
+            </div>
+            <div class="col-4 col-md-2">
+              <div class="card text-center p-2" style="border-left:4px solid #198754;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="tickets-resueltos">0</div>
+                  <small class="text-muted">✅ Resueltos</small>
+                </div>
+              </div>
+            </div>
+            <div class="col-4 col-md-2">
+              <div class="card text-center p-2" style="border-left:4px solid #6c757d;">
+                <div class="card-body p-1">
+                  <div class="h5 mb-0" id="tickets-total">0</div>
+                  <small class="text-muted">📋 Total</small>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 🔍 Filtros -->
+          <div class="fm-filtros mb-3">
+            <div class="row g-2 align-items-end">
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Estado</label>
+                <select id="fil-ticket-estado" class="form-select form-select-sm" onchange="cargarTickets()">
+          <option value="">Todos</option>
+          <option value="Pendiente">⏳ Pendiente</option>
+          <option value="En proceso">🔄 En proceso</option>
+          <option value="Resuelto">✅ Resuelto</option>
+        </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Unidad</label>
+                <input type="text" id="fil-ticket-unidad" class="form-control form-control-sm" placeholder="Ej: G-361" oninput="cargarTickets()">
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label small">Técnico</label>
+                <input type="text" id="fil-ticket-tecnico" class="form-control form-control-sm" placeholder="Nombre del técnico" oninput="cargarTickets()">
+              </div>
+              <div class="col-6 col-md-3">
+                <button class="btn btn-sm btn-outline-secondary w-100" onclick="limpiarFiltrosTickets()">
+          <i class="bi bi-funnel me-1"></i>Limpiar filtros
+        </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 📋 Tabla de tickets -->
+          <div class="table-responsive">
+            <table class="table table-hover fm-tabla" id="tabla-tickets">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Fecha</th>
+                  <th>Unidad</th>
+                  <th>Descripción</th>
+                  <th>Estado</th>
+                  <th>Técnico</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="tickets-body">
+                <tr>
+                  <td colspan="7" class="text-center text-muted py-3">Cargando tickets...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Total de tickets -->
+          <div class="mt-2 text-muted small" id="tickets-total-text">Total: 0 tickets</div>
+        </div>
+        <!-- ─── PANEL: HISTORIAL DEL TÉCNICO ─── -->
+        <div id="panel-historial" class="fm-panel d-none">
+          <div class="fm-panel-header">
+            <h2><i class="bi bi-clock-history me-2"></i>Mi historial de pagos</h2>
+          </div>
+          <div id="historial-cards"></div>
+          <div id="historial-vacio" class="fm-empty d-none">
+            <i class="bi bi-inbox"></i>
+            <p>Aún no tienes registros aprobados o pagados.</p>
+          </div>
+        </div>
+
+      </main><!-- /fm-main -->
+    </div><!-- /fm-layout -->
+
+    <!-- Bottom nav (móvil) -->
+    <nav class="fm-bottom-nav d-md-none">
+      <a class="fm-bnav-item active" data-panel="panel-dashboard" onclick="mostrarPanel(this)">
+        <i class="bi bi-speedometer2"></i><span>Dashboard</span>
+      </a>
+      <a class="fm-bnav-item active" data-panel="panel-nuevo" onclick="mostrarPanel(this)">
+        <i class="bi bi-plus-circle"></i><span>Nuevo</span>
+      </a>
+      <a class="fm-bnav-item" data-panel="panel-mis-registros" onclick="mostrarPanel(this)">
+        <i class="bi bi-file-earmark-text"></i><span>Registros</span>
+      </a>
+      <a class="fm-bnav-item d-none" id="bnav-registros" data-panel="panel-registros" onclick="mostrarPanel(this)">
+        <i class="bi bi-table"></i><span>Registros</span>
+      </a>
+      <a class="fm-bnav-item" data-panel="panel-tickets" onclick="mostrarPanel(this)">
+        <i class="bi bi-ticket-perforated"></i><span>Tickets</span>
+      </a>
+      <a class="fm-bnav-item" data-panel="panel-historial" onclick="mostrarPanel(this)">
+        <i class="bi bi-clock-history"></i><span>Historial</span>
+      </a>
+      <a class="fm-bnav-item" data-panel="panel-borradores" onclick="mostrarPanel(this)">
+        <i class="bi bi-pencil-square"></i><span>Borradores</span>
+      </a>
+      <a class="fm-bnav-item d-none" id="bnav-flotilla" data-panel="panel-flotilla" onclick="mostrarPanel(this)">
+        <i class="bi bi-truck"></i><span>Flotilla</span>
+      </a>
+    </nav>
+
+  </div><!-- /pantalla-app -->
+
+
+  <!-- MODAL DE DETALLE / EDICIÓN -->
+  <div class="modal fade" id="modal-detalle" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modal-folio-title">Folio —</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="modal-body-content"></div>
+        <div class="modal-footer" id="modal-footer-content"></div>
+      </div>
+    </div>
+  </div>
+  <!-- MODAL DE CONFIRMACIÓN DE REEMPLAZO -->
+  <div class="modal fade" id="modal-reemplazo" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">🔄 Reemplazo de GPS</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p>La serie <strong id="reemplazo-serie-nueva"></strong> se instalará en el vehículo
+            <strong id="reemplazo-economico"></strong>.
+          </p>
+          <p>La serie actual <strong id="reemplazo-serie-vieja"></strong> será retirada.</p>
+
+          <div class="mb-3">
+            <label class="form-label">Motivo del reemplazo:</label>
+            <select id="reemplazo-motivo" class="form-select">
+              <option value="falla">🔧 Falla del equipo</option>
+              <option value="actualizacion">📡 Actualización de modelo</option>
+              <option value="mejora">⬆️ Mejora de versión</option>
+              <option value="otro">📝 Otro</option>
+            </select>
+          </div>
+
+          <div class="mb-3" id="reemplazo-otro-container" style="display:none;">
+            <label class="form-label">Especifica el motivo:</label>
+            <input type="text" id="reemplazo-otro-texto" class="form-control" placeholder="Describe el motivo...">
+          </div>
+
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="reemplazo-garantia">
+            <label class="form-check-label" for="reemplazo-garantia">
+              📋 Marcar como garantía (la serie anterior se bloquea)
+            </label>
+          </div>
+
+          <div id="reemplazo-info-garantia" class="alert alert-info mt-2" style="display:none;">
+            <i class="bi bi-info-circle me-1"></i>
+            La serie anterior quedará bloqueada permanentemente y no podrá reutilizarse.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-danger" onclick="confirmarReemplazo()">
+            <i class="bi bi-arrow-repeat me-1"></i>Confirmar reemplazo
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- TOAST de notificación -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="fm-toast" class="toast align-items-center" role="alert">
+      <div class="d-flex">
+        <div class="toast-body" id="toast-msg"></div>
+        <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <?!= include('Scripts'); ?>
+  <!-- INPUT OCULTO PARA CÁMARA OCR -->
+  <input type="file" id="camaraOCRInput" accept="image/*" capture="environment" style="display:none;" onchange="procesarFotoOCR(this)">
+  <!-- INPUT OCULTO PARA CÁMARA TESSERACT -->
+  <input type="file" id="camaraTesseractInput" accept="image/*" capture="environment" style="display:none;">
+</body>
+
+</html>

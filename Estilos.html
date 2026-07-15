@@ -1,0 +1,256 @@
+<style>
+/* ── Variables y reset ── */
+:root {
+  --fm-primary:   #1a56db;
+  --fm-primary-d: #1040b0;
+  --fm-dark:      #0f172a;
+  --fm-nav-h:     56px;
+  --fm-side-w:    220px;
+  --fm-bot-h:     62px;
+  --fm-radius:    10px;
+  --fm-shadow:    0 1px 4px rgba(0,0,0,.10);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; font-family: 'Segoe UI', system-ui, sans-serif;
+       background: #f1f5f9; color: #1e293b; }
+
+/* ── LOGIN ── */
+.login-wrapper {
+  min-height: 100vh; display: flex;
+  align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+  padding: 1rem;
+}
+.login-card {
+  background: #fff; border-radius: 16px;
+  padding: 2.5rem 2rem; width: 100%; max-width: 400px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.25);
+}
+.login-logo {
+  display: flex; align-items: center; gap: .6rem;
+  font-size: 1.5rem; font-weight: 700; color: var(--fm-primary);
+  margin-bottom: .25rem;
+}
+.login-logo .bi { font-size: 2rem; }
+.login-subtitle { color: #64748b; font-size: .85rem; margin-bottom: 1.5rem; }
+
+/* ── NAVBAR ── */
+.fm-navbar {
+  background: var(--fm-dark);
+  height: var(--fm-nav-h);
+  position: sticky; top: 0; z-index: 1030;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+.fm-badge-rol {
+  background: var(--fm-primary);
+  font-size: .7rem; padding: .3em .6em;
+}
+
+/* ── LAYOUT ── */
+.fm-layout {
+  display: flex;
+  min-height: calc(100vh - var(--fm-nav-h));
+}
+
+/* ── SIDEBAR (escritorio) ── */
+.fm-sidebar {
+  width: var(--fm-side-w);
+  background: #fff;
+  border-right: 1px solid #e2e8f0;
+  padding: 1rem .5rem;
+  position: sticky;
+  top: var(--fm-nav-h);
+  height: calc(100vh - var(--fm-nav-h));
+  overflow-y: auto;
+}
+.fm-sidenav { display: flex; flex-direction: column; gap: .25rem; }
+.fm-navitem {
+  display: flex; align-items: center; gap: .65rem;
+  padding: .6rem .9rem; border-radius: var(--fm-radius);
+  color: #475569; text-decoration: none;
+  font-size: .9rem; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.fm-navitem:hover  { background: #f1f5f9; color: var(--fm-primary); }
+.fm-navitem.active { background: #eff6ff; color: var(--fm-primary);
+                     font-weight: 600; }
+.fm-navitem .bi { font-size: 1.1rem; }
+
+/* ── MAIN ── */
+.fm-main {
+  flex: 1; padding: 1.5rem;
+  max-width: 960px;
+  overflow-y: auto;
+}
+
+/* ── PANELS ── */
+.fm-panel { animation: fadeIn .2s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; } }
+
+.fm-panel-header {
+  display: flex; align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem; flex-wrap: wrap; gap: .5rem;
+}
+.fm-panel-header h2 {
+  font-size: 1.25rem; font-weight: 700; margin: 0; color: var(--fm-dark);
+}
+
+.folio-badge {
+  background: #0f172a; color: #38bdf8;
+  font-family: monospace; font-size: 1.1rem;
+  padding: .3rem .8rem; border-radius: 6px;
+  letter-spacing: .05em;
+}
+
+/* ── FORM SECTIONS ── */
+.fm-section-title {
+  font-size: .8rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .08em; color: #94a3b8;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: .4rem; margin-bottom: .75rem;
+  display: flex; align-items: center; gap: .4rem;
+}
+.form-label.required::after {
+  content: ' *'; color: #ef4444;
+}
+.fm-precio { font-weight: 700; color: var(--fm-primary); background: #eff6ff !important; }
+
+/* ── DROPZONE ── */
+.fm-dropzone {
+  border: 2px dashed #94a3b8; border-radius: var(--fm-radius);
+  padding: 2rem 1rem; text-align: center;
+  background: #f8fafc; cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.fm-dropzone.dragover {
+  border-color: var(--fm-primary); background: #eff6ff;
+}
+.fm-drop-icon { font-size: 2.5rem; color: #94a3b8; display: block; margin-bottom: .5rem; }
+
+/* ── FOTO GRID ── */
+.fm-foto-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: .5rem;
+}
+.fm-foto-item {
+  position: relative; border-radius: 8px; overflow: hidden;
+  aspect-ratio: 1; background: #e2e8f0;
+}
+.fm-foto-item img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.fm-foto-item .fm-foto-del {
+  position: absolute; top: 3px; right: 3px;
+  background: rgba(0,0,0,.55); color: #fff;
+  border: none; border-radius: 50%;
+  width: 22px; height: 22px;
+  font-size: .75rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1;
+}
+
+/* ── FILTROS ── */
+.fm-filtros {
+  background: #fff; border: 1px solid #e2e8f0;
+  border-radius: var(--fm-radius); padding: .75rem 1rem;
+}
+
+/* ── TABLA ── */
+.fm-tabla { font-size: .85rem; }
+.fm-tabla th { background: #f8fafc; font-weight: 600;
+               color: #475569; border-bottom: 2px solid #e2e8f0; }
+.fm-tabla td { vertical-align: middle; }
+
+/* ── BADGES DE ESTADO ── */
+.badge-borrador    { background: #fef9c3; color: #854d0e; }
+.badge-revision    { background: #dbeafe; color: #1e40af; }
+.badge-aprobado    { background: #dcfce7; color: #166534; }
+.badge-pagado      { background: #f0fdf4; color: #15803d; border: 1px solid #86efac; }
+
+/* ── CARDS MÓVIL ── */
+.fm-reg-card {
+  background: #fff; border: 1px solid #e2e8f0;
+  border-radius: var(--fm-radius); padding: 1rem;
+  margin-bottom: .75rem; box-shadow: var(--fm-shadow);
+}
+.fm-reg-card .folio { font-family: monospace; font-weight: 700;
+                       color: var(--fm-primary); }
+.fm-reg-card .meta { font-size: .8rem; color: #64748b; margin: .25rem 0; }
+
+/* ── HISTORIAL CARD ── */
+.fm-hist-card {
+  background: #fff; border-left: 4px solid var(--fm-primary);
+  border-radius: 0 var(--fm-radius) var(--fm-radius) 0;
+  padding: 1rem 1.25rem; margin-bottom: .75rem;
+  box-shadow: var(--fm-shadow);
+}
+.fm-hist-card.pagado { border-color: #22c55e; }
+.fm-hist-card .folio { font-family: monospace; font-size: .9rem;
+                        font-weight: 700; }
+
+/* ── EMPTY STATE ── */
+.fm-empty {
+  text-align: center; padding: 3rem 1rem; color: #94a3b8;
+}
+.fm-empty .bi { font-size: 3rem; display: block; margin-bottom: .75rem; }
+
+/* ── BOTTOM NAV (móvil) ── */
+.fm-bottom-nav {
+  display: none;
+  position: fixed; bottom: 0; left: 0; right: 0;
+  height: var(--fm-bot-h);
+  background: #fff; border-top: 1px solid #e2e8f0;
+  z-index: 1020;
+  justify-content: space-around; align-items: center;
+}
+.fm-bnav-item {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 2px; text-decoration: none; color: #64748b;
+  font-size: .65rem; padding: .4rem .6rem;
+  border-radius: 8px; cursor: pointer;
+  transition: color .15s;
+}
+.fm-bnav-item .bi { font-size: 1.3rem; }
+.fm-bnav-item.active { color: var(--fm-primary); font-weight: 600; }
+
+/* ── RESPONSIVO ── */
+@media (max-width: 767px) {
+  .fm-sidebar    { display: none; }
+  .fm-bottom-nav { display: flex; }
+  .fm-main {
+    padding: 1rem .75rem;
+    padding-bottom: calc(var(--fm-bot-h) + 1rem);
+  }
+  .fm-layout { min-height: calc(100vh - var(--fm-nav-h) - var(--fm-bot-h)); }
+}
+/* ── HISTORIAL DE PAGOS MEJORADO ── */
+.fm-hist-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.fm-hist-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+.fm-hist-card .folio {
+  font-family: 'Courier New', monospace;
+  font-weight: 700;
+  color: #1a56db;
+  font-size: 14px;
+}
+.fm-hist-card.pagado {
+  border-left-color: #28a745 !important;
+}
+.fm-hist-card .badge-pagado {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #86efac;
+}
+.fm-hist-card .badge-aprobado {
+  background: #cce5ff;
+  color: #004085;
+  border: 1px solid #93c5fd;
+}
+</style>
