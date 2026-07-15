@@ -7900,8 +7900,8 @@ function guardarVehiculo() {
 // ============================================================
 
 /**
- * Carga la flotilla desde el backend y la renderiza
- * Usa el catálogo de estados para mostrar nombres y colores
+ * Carga la flotilla desde el backend, mapea los estados del catálogo
+ * y muestra el número de serie real del GPS
  */
 function cargarFlotilla() {
   console.log('🚚 cargarFlotilla - Ejecutando...');
@@ -7928,7 +7928,7 @@ function cargarFlotilla() {
     </tr>
   `;
   
-  // 1. Obtener estados primero (para mapear)
+  // 1. OBTENER ESTADOS PRIMERO (para mapear)
   google.script.run
     .withSuccessHandler(function(estados) {
       console.log('✅ Estados cargados:', estados.length);
@@ -7939,7 +7939,7 @@ function cargarFlotilla() {
         timestamp: Date.now()
       };
       
-      // 2. Obtener flotilla
+      // 2. OBTENER FLOTILLA
       google.script.run
         .withSuccessHandler(function(resp) {
           console.log('✅ Flotilla recibida:', resp);
@@ -7969,7 +7969,7 @@ function cargarFlotilla() {
             return;
           }
           
-          // 3. Renderizar vehículos con estados mapeados
+          // 3. RENDERIZAR VEHÍCULOS CON ESTADOS MAPEADOS
           var html = '';
           resp.vehiculos.forEach(function(v) {
             // Buscar el estado en el catálogo por ID
@@ -7981,29 +7981,25 @@ function cargarFlotilla() {
             var estadoColor = estadoObj ? estadoObj.color : 'secondary';
             var badgeClass = 'badge bg-' + estadoColor;
             
-            // Obtener el GPS real de la columna GPS_ACTUAL
+            // OBTENER EL GPS REAL de la columna GPS_ACTUAL
             var gpsActual = v.gateway || v.gpsActual || '—';
             
-            html += `
-              <tr>
-                <td><strong>${v.economico || '-'}</strong></td>
-                <td>${v.placas || '-'}</td>
-                <td>${v.tipoVehiculo || '-'}</td>
-                <td>${(v.marca || '')} ${(v.modelo || '')}</td>
-                <td><span class="${badgeClass}">${estadoNombre}</span></td>
-                <td>${v.tipoUnidad || '-'}</td>
-                <td>${gpsActual}</td>
-                <td>${v.camara || '-'}</td>
-                <td>${v.accesorios || '-'}</td>
-                <td>
-                  <button class="btn btn-sm btn-outline-primary" 
-                          onclick="mostrarFormEditarVehiculo('${v.economico}')"
-                          title="Editar vehículo">
-                    <i class="bi bi-pencil-square"></i>
-                  </button>
-                </td>
-              </tr>
-            `;
+html += `
+  <td>
+    <div class="btn-group btn-group-sm" role="group">
+      <button class="btn btn-outline-primary" 
+              onclick="mostrarFormEditarVehiculo('${v.economico}')"
+              title="Editar vehículo">
+        <i class="bi bi-pencil-square"></i>
+      </button>
+      <button class="btn btn-outline-secondary" 
+              onclick="abrirModalEstado('${v.economico}')"
+              title="Cambiar estado">
+        <i class="bi bi-tag"></i>
+      </button>
+    </div>
+  </td>
+`;
           });
           
           tbody.innerHTML = html;
@@ -8019,7 +8015,7 @@ function cargarFlotilla() {
             <tr>
               <td colspan="10" class="text-center text-danger py-3">
                 <i class="bi bi-exclamation-triangle me-2"></i>
-                Error al cargar flotilla: ${err.message}
+                Error: ${err.message}
               </td>
             </tr>
           `;
@@ -8030,7 +8026,7 @@ function cargarFlotilla() {
     })
     .withFailureHandler(function(err) {
       console.error('❌ Error al cargar estados:', err);
-      // Intentar cargar flotilla sin estados (con valores por defecto)
+      // Fallback: cargar flotilla sin estados
       cargarFlotillaSinEstados();
     })
     .obtenerEstadosVehiculo();
@@ -8039,7 +8035,7 @@ function cargarFlotilla() {
  * Carga flotilla sin estados (fallback)
  */
 function cargarFlotillaSinEstados() {
-  console.log('🔄 cargarFlotillaSinEstados - Fallback');
+  console.log('🔄 Fallback: cargando flotilla sin estados');
   
   google.script.run
     .withSuccessHandler(function(resp) {
@@ -8052,6 +8048,7 @@ function cargarFlotillaSinEstados() {
       
       var html = '';
       resp.vehiculos.forEach(function(v) {
+        var gpsActual = v.gateway || v.gpsActual || '—';
         html += `
           <tr>
             <td><strong>${v.economico || '-'}</strong></td>
@@ -8060,7 +8057,7 @@ function cargarFlotillaSinEstados() {
             <td>${(v.marca || '')} ${(v.modelo || '')}</td>
             <td><span class="badge bg-secondary">${v.estadoNombre || 'Sin estado'}</span></td>
             <td>${v.tipoUnidad || '-'}</td>
-            <td>${v.gateway || v.gpsActual || '-'}</td>
+            <td>${gpsActual}</td>
             <td>${v.camara || '-'}</td>
             <td>${v.accesorios || '-'}</td>
             <td>
@@ -8092,18 +8089,48 @@ function cargarFlotillaSinEstados() {
  * Abre el modal para cambiar estado
  */
 function abrirModalEstado(economico) {
-  console.log('📋 Abriendo modal para:', economico);
+  console.log('📋 Abriendo modal para cambiar estado de:', economico);
   
+  // Mostrar el económico en el modal
   var econLabel = document.getElementById('modal-estado-economico');
   if (econLabel) econLabel.textContent = economico;
   
+  // Cargar estados en el selector
   cargarEstadosVehiculo('selector-estado-flotilla');
   
+  // Guardar el económico en un atributo del modal
   var modal = document.getElementById('modal-cambiar-estado');
-  if (modal) modal.dataset.economico = economico;
+  if (modal) {
+    modal.dataset.economico = economico;
+  }
   
+  // Mostrar el modal
   var modalInstance = new bootstrap.Modal(document.getElementById('modal-cambiar-estado'));
   modalInstance.show();
+}
+
+function cambiarEstadoVehiculo() {
+  var selector = document.getElementById('selector-estado-flotilla');
+  var estadoId = selector.value;
+  
+  if (!estadoId) {
+    mostrarToast('Por favor selecciona un estado', 'warning');
+    return;
+  }
+  
+  var modal = document.getElementById('modal-cambiar-estado');
+  var economico = modal.dataset.economico;
+  
+  if (!economico) {
+    mostrarToast('No se pudo identificar el vehículo', 'danger');
+    return;
+  }
+  
+  actualizarEstadoVehiculo(economico, estadoId);
+  
+  // Cerrar modal
+  var modalInstance = bootstrap.Modal.getInstance(modal);
+  if (modalInstance) modalInstance.hide();
 }
 
 /**
@@ -8842,7 +8869,8 @@ function actualizarResumenFlotilla(vehiculos) {
       return v.estadoNombre === 'Inactivo' || v.estadoId === '2'; 
     }).length;
     var conEquipos = vehiculos.filter(function(v) { 
-      return v.gateway && v.gateway !== '' && v.gateway !== '-' && v.gateway !== 'Sin GPS'; 
+      var gps = v.gateway || v.gpsActual || '';
+      return gps !== '' && gps !== '-' && gps !== 'Sin GPS' && gps !== 'Pendiente'; 
     }).length;
     var sinEquipos = total - conEquipos;
     
