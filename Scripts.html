@@ -7895,11 +7895,16 @@ function guardarVehiculo() {
     })
     .guardarVehiculoFlotilla(datos);
 }
+// ============================================================
+// CARGA DE FLOTILLA - VERSIÓN CORREGIDA
+// ============================================================
+
 /**
- * Carga la flotilla - VERSIÓN ESTABLE
+ * Carga la flotilla desde el backend y la renderiza
+ * Usa el catálogo de estados para mostrar nombres y colores
  */
 function cargarFlotilla() {
-  console.log('🚚 Iniciando cargarFlotilla...');
+  console.log('🚚 cargarFlotilla - Ejecutando...');
   
   if (!APP.token) {
     console.log('⏳ Esperando token...');
@@ -7913,7 +7918,7 @@ function cargarFlotilla() {
     return;
   }
   
-  // Mostrar loading
+  // Mostrar estado de carga
   tbody.innerHTML = `
     <tr>
       <td colspan="10" class="text-center text-muted py-3">
@@ -7923,83 +7928,162 @@ function cargarFlotilla() {
     </tr>
   `;
   
-  // Llamar al backend
+  // 1. Obtener estados primero (para mapear)
+  google.script.run
+    .withSuccessHandler(function(estados) {
+      console.log('✅ Estados cargados:', estados.length);
+      
+      // Guardar en caché global
+      _estadosVehiculoCache = {
+        estados: estados,
+        timestamp: Date.now()
+      };
+      
+      // 2. Obtener flotilla
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          console.log('✅ Flotilla recibida:', resp);
+          
+          if (!resp.ok) {
+            tbody.innerHTML = `
+              <tr>
+                <td colspan="10" class="text-center text-danger py-3">
+                  <i class="bi bi-exclamation-triangle me-2"></i>
+                  ${resp.error || 'Error al cargar flotilla'}
+                </td>
+              </tr>
+            `;
+            return;
+          }
+          
+          if (!resp.vehiculos || resp.vehiculos.length === 0) {
+            tbody.innerHTML = `
+              <tr>
+                <td colspan="10" class="text-center text-muted py-3">
+                  <i class="bi bi-inbox me-2"></i>
+                  No hay vehículos registrados
+                </td>
+              </tr>
+            `;
+            actualizarResumenFlotilla([]);
+            return;
+          }
+          
+          // 3. Renderizar vehículos con estados mapeados
+          var html = '';
+          resp.vehiculos.forEach(function(v) {
+            // Buscar el estado en el catálogo por ID
+            var estadoObj = estados.find(function(e) { 
+              return e.id === v.estadoId; 
+            });
+            
+            var estadoNombre = estadoObj ? estadoObj.nombre : 'Sin estado';
+            var estadoColor = estadoObj ? estadoObj.color : 'secondary';
+            var badgeClass = 'badge bg-' + estadoColor;
+            
+            // Obtener el GPS real de la columna GPS_ACTUAL
+            var gpsActual = v.gateway || v.gpsActual || '—';
+            
+            html += `
+              <tr>
+                <td><strong>${v.economico || '-'}</strong></td>
+                <td>${v.placas || '-'}</td>
+                <td>${v.tipoVehiculo || '-'}</td>
+                <td>${(v.marca || '')} ${(v.modelo || '')}</td>
+                <td><span class="${badgeClass}">${estadoNombre}</span></td>
+                <td>${v.tipoUnidad || '-'}</td>
+                <td>${gpsActual}</td>
+                <td>${v.camara || '-'}</td>
+                <td>${v.accesorios || '-'}</td>
+                <td>
+                  <button class="btn btn-sm btn-outline-primary" 
+                          onclick="mostrarFormEditarVehiculo('${v.economico}')"
+                          title="Editar vehículo">
+                    <i class="bi bi-pencil-square"></i>
+                  </button>
+                </td>
+              </tr>
+            `;
+          });
+          
+          tbody.innerHTML = html;
+          console.log('✅ Flotilla renderizada: ' + resp.vehiculos.length + ' vehículos');
+          
+          // Actualizar resumen
+          actualizarResumenFlotilla(resp.vehiculos);
+          
+        })
+        .withFailureHandler(function(err) {
+          console.error('❌ Error al cargar flotilla:', err);
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="10" class="text-center text-danger py-3">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                Error al cargar flotilla: ${err.message}
+              </td>
+            </tr>
+          `;
+          mostrarToast('Error al cargar flotilla: ' + err.message, 'danger');
+        })
+        .obtenerFlotilla();
+        
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al cargar estados:', err);
+      // Intentar cargar flotilla sin estados (con valores por defecto)
+      cargarFlotillaSinEstados();
+    })
+    .obtenerEstadosVehiculo();
+}
+/**
+ * Carga flotilla sin estados (fallback)
+ */
+function cargarFlotillaSinEstados() {
+  console.log('🔄 cargarFlotillaSinEstados - Fallback');
+  
   google.script.run
     .withSuccessHandler(function(resp) {
-      console.log('✅ Respuesta de obtenerFlotilla:', resp);
-      
-      if (!resp.ok) {
-        tbody.innerHTML = `
-          <tr>
-            <td colspan="10" class="text-center text-danger py-3">
-              <i class="bi bi-exclamation-triangle me-2"></i>
-              ${resp.error || 'Error al cargar flotilla'}
-            </td>
-          </tr>
+      if (!resp.ok || !resp.vehiculos) {
+        document.getElementById('flotilla-body').innerHTML = `
+          <tr><td colspan="10" class="text-center text-danger">Error al cargar datos</td></tr>
         `;
         return;
       }
       
-      if (!resp.vehiculos || resp.vehiculos.length === 0) {
-        tbody.innerHTML = `
-          <tr>
-            <td colspan="10" class="text-center text-muted py-3">
-              <i class="bi bi-inbox me-2"></i>
-              No hay vehículos registrados
-            </td>
-          </tr>
-        `;
-        return;
-      }
-      
-      // Renderizar vehículos
       var html = '';
       resp.vehiculos.forEach(function(v) {
-        var badgeClass = 'badge bg-' + (v.estadoColor || 'secondary');
-        var estadoDisplay = v.estadoNombre || 'Sin estado';
-        
         html += `
           <tr>
             <td><strong>${v.economico || '-'}</strong></td>
             <td>${v.placas || '-'}</td>
             <td>${v.tipoVehiculo || '-'}</td>
             <td>${(v.marca || '')} ${(v.modelo || '')}</td>
-            <td><span class="${badgeClass}">${estadoDisplay}</span></td>
+            <td><span class="badge bg-secondary">${v.estadoNombre || 'Sin estado'}</span></td>
             <td>${v.tipoUnidad || '-'}</td>
-            <td>${v.gateway || '-'}</td>
+            <td>${v.gateway || v.gpsActual || '-'}</td>
             <td>${v.camara || '-'}</td>
             <td>${v.accesorios || '-'}</td>
             <td>
               <button class="btn btn-sm btn-outline-primary" 
-                      onclick="abrirModalEstado('${v.economico}')"
-                      title="Cambiar estado">
-                <i class="bi bi-pencil"></i>
+                      onclick="mostrarFormEditarVehiculo('${v.economico}')">
+                <i class="bi bi-pencil-square"></i>
               </button>
             </td>
           </tr>
         `;
       });
       
-      tbody.innerHTML = html;
-      console.log(`✅ Flotilla cargada: ${resp.vehiculos.length} vehículos`);
-      
-      // Actualizar resumen
+      document.getElementById('flotilla-body').innerHTML = html;
       actualizarResumenFlotilla(resp.vehiculos);
     })
     .withFailureHandler(function(err) {
-      console.error('❌ Error en cargarFlotilla:', err);
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="10" class="text-center text-danger py-3">
-            <i class="bi bi-exclamation-triangle me-2"></i>
-            Error al cargar flotilla: ${err.message}
-          </td>
-        </tr>
+      document.getElementById('flotilla-body').innerHTML = `
+        <tr><td colspan="10" class="text-center text-danger">Error: ${err.message}</td></tr>
       `;
-      mostrarToast('Error al cargar flotilla: ' + err.message, 'danger');
     })
     .obtenerFlotilla();
 }
+
 // ============================================================
 // MODAL PARA CAMBIAR ESTADO
 // ============================================================
@@ -8758,11 +8842,9 @@ function actualizarResumenFlotilla(vehiculos) {
       return v.estadoNombre === 'Inactivo' || v.estadoId === '2'; 
     }).length;
     var conEquipos = vehiculos.filter(function(v) { 
-      return v.gateway && v.gateway !== ''; 
+      return v.gateway && v.gateway !== '' && v.gateway !== '-' && v.gateway !== 'Sin GPS'; 
     }).length;
-    var sinEquipos = vehiculos.filter(function(v) { 
-      return !v.gateway || v.gateway === ''; 
-    }).length;
+    var sinEquipos = total - conEquipos;
     
     document.getElementById('flotilla-total').textContent = total;
     document.getElementById('flotilla-activos').textContent = activos;
