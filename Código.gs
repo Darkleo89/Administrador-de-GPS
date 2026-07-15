@@ -4930,12 +4930,16 @@ function obtenerColorEstado(estadoId) {
     return 'secondary';
   }
 }
-// Función mejorada para guardar vehículo en flotilla
+
+/**
+ * Guarda o actualiza un vehículo en la flotilla
+ */
 function guardarVehiculoFlotilla(datos) {
   try {
     console.log('🚚 Guardando vehículo en flotilla:', datos);
     
-    const sheet = SHEETS.FLOTILLA();
+    const sheet = SpreadsheetApp.getActiveSpreadsheet()
+      .getSheetByName('🚚_Flotilla_Fallas');
     if (!sheet) {
       throw new Error('No se encontró la hoja de Flotilla');
     }
@@ -4948,44 +4952,48 @@ function guardarVehiculoFlotilla(datos) {
       modelo, 
       año,
       serieVehiculo,
-      estado,        // ✅ Nuevo: ID del estado
-      tipoUnidad     // ✅ Nuevo: Tipo de unidad
+      estado,
+      tipoUnidad 
     } = datos;
     
     // Validar campos obligatorios
-    if (!economico || !placas) {
-      throw new Error('Económico y Placas son obligatorios');
+    if (!economico || economico.trim() === '') {
+      throw new Error('El económico es obligatorio');
+    }
+    
+    if (!placas || placas.trim() === '') {
+      throw new Error('Las placas son obligatorias');
     }
     
     const ahora = new Date();
     const headers = sheet.getDataRange().getValues()[0];
     const idxEconomico = headers.indexOf('ECONOMICO');
-    const idxEstado = headers.indexOf('ESTADO'); // ✅ Columna donde se guarda el estado
     
     // Buscar si ya existe
     const data = sheet.getDataRange().getValues();
     let filaExistente = -1;
     
     for (let i = 1; i < data.length; i++) {
-      if (data[i][idxEconomico] === economico) {
+      const econActual = data[i][idxEconomico] ? data[i][idxEconomico].toString().trim() : '';
+      if (econActual === economico.trim()) {
         filaExistente = i + 1; // Fila real en Sheets
         break;
       }
     }
     
-    // Preparar la fila
+    // Preparar la fila completa
     const nuevaFila = [
-      economico,           // A: ECONOMICO
-      placas,              // B: PLACAS
-      tipoVehiculo || '',  // C: TIPO_VEHICULO
-      marca || '',         // D: MARCA
-      modelo || '',        // E: MODELO
-      año || '',           // F: AÑO
-      serieVehiculo || '', // G: SERIE_VEHICULO
-      '',                  // H: GPS_ACTUAL
-      estado || '',        // I: ESTADO ✅ Guardamos el ID del estado
-      ahora,               // J: ULTIMO_SERVICIO
-      tipoUnidad || ''     // K: TIPO_UNIDAD
+      economico.trim(),                              // A: ECONOMICO
+      placas.trim(),                                 // B: PLACAS
+      tipoVehiculo ? tipoVehiculo.trim() : '',       // C: TIPO_VEHICULO
+      marca ? marca.trim() : '',                     // D: MARCA
+      modelo ? modelo.trim() : '',                   // E: MODELO
+      año ? año.toString().trim() : '',              // F: AÑO
+      serieVehiculo ? serieVehiculo.trim() : '',     // G: SERIE_VEHICULO
+      '',                                            // H: GPS_ACTUAL
+      estado ? estado.toString().trim() : '',        // I: ESTADO
+      ahora,                                         // J: ULTIMO_SERVICIO
+      tipoUnidad ? tipoUnidad.trim() : ''            // K: TIPO_UNIDAD
     ];
     
     if (filaExistente === -1) {
@@ -5006,46 +5014,75 @@ function guardarVehiculoFlotilla(datos) {
     return { ok: false, error: error.message };
   }
 }
-// Función mejorada para obtener flotilla
+/**
+ * Obtiene la flotilla completa con estados enriquecidos
+ */
 function obtenerFlotilla() {
   try {
-    const sheet = SHEETS.FLOTILLA();
+    console.log('🚚 Iniciando obtenerFlotilla...');
+    
+    // Verificar que exista la hoja
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName('🚚_Flotilla_Fallas');
     if (!sheet) {
+      console.error('❌ No se encontró la hoja de Flotilla');
       return { ok: false, error: 'No se encontró la hoja de Flotilla' };
     }
     
+    // Obtener datos
     const data = sheet.getDataRange().getValues();
+    if (data.length < 2) {
+      console.log('ℹ️ No hay vehículos registrados');
+      return { ok: true, vehiculos: [] };
+    }
+    
     const headers = data[0];
-    const idxEstado = headers.indexOf('ESTADO');
+    console.log('📋 Headers:', headers);
+    
+    // Obtener índices de columnas
     const idxEconomico = headers.indexOf('ECONOMICO');
     const idxPlacas = headers.indexOf('PLACAS');
     const idxTipoVehiculo = headers.indexOf('TIPO_VEHICULO');
     const idxMarca = headers.indexOf('MARCA');
     const idxModelo = headers.indexOf('MODELO');
     const idxAño = headers.indexOf('AÑO');
+    const idxSerieVehiculo = headers.indexOf('SERIE_VEHICULO');
+    const idxGpsActual = headers.indexOf('GPS_ACTUAL');
+    const idxEstado = headers.indexOf('ESTADO');
+    const idxUltimoServicio = headers.indexOf('ULTIMO_SERVICIO');
     const idxTipoUnidad = headers.indexOf('TIPO_UNIDAD');
+    
+    // Obtener estados para mapear
+    const estados = obtenerEstadosVehiculo();
+    console.log('📋 Estados disponibles:', estados.length);
     
     const vehiculos = [];
     
-    // Obtener todos los estados para mapear
-    const estados = obtenerEstadosVehiculo();
-    
+    // Procesar cada fila
     for (let i = 1; i < data.length; i++) {
       const fila = data[i];
-      const estadoId = fila[idxEstado] ? fila[idxEstado].toString() : '';
+      
+      // Saltar filas vacías
+      if (!fila[idxEconomico] || fila[idxEconomico].toString().trim() === '') continue;
+      
+      const economico = fila[idxEconomico].toString().trim();
+      const estadoId = fila[idxEstado] ? fila[idxEstado].toString().trim() : '';
       
       // Buscar el estado por ID
       const estado = estados.find(e => e.id === estadoId);
       
       vehiculos.push({
-        economico: fila[idxEconomico] || '',
-        placas: fila[idxPlacas] || '',
-        tipoVehiculo: fila[idxTipoVehiculo] || '',
-        marca: fila[idxMarca] || '',
-        modelo: fila[idxModelo] || '',
-        año: fila[idxAño] || '',
-        tipoUnidad: fila[idxTipoUnidad] || '',
-        // ✅ Datos del estado enriquecidos
+        economico: economico,
+        placas: fila[idxPlacas] ? fila[idxPlacas].toString().trim() : '',
+        tipoVehiculo: fila[idxTipoVehiculo] ? fila[idxTipoVehiculo].toString().trim() : '',
+        marca: fila[idxMarca] ? fila[idxMarca].toString().trim() : '',
+        modelo: fila[idxModelo] ? fila[idxModelo].toString().trim() : '',
+        año: fila[idxAño] ? fila[idxAño].toString().trim() : '',
+        serieVehiculo: fila[idxSerieVehiculo] ? fila[idxSerieVehiculo].toString().trim() : '',
+        gateway: fila[idxGpsActual] ? fila[idxGpsActual].toString().trim() : '',
+        tipoUnidad: fila[idxTipoUnidad] ? fila[idxTipoUnidad].toString().trim() : '',
+        ultimoServicio: fila[idxUltimoServicio] || '',
+        // Datos del estado enriquecidos
         estadoId: estadoId,
         estadoNombre: estado ? estado.nombre : 'Sin estado',
         estadoColor: estado ? estado.color : 'secondary',
@@ -5054,10 +5091,104 @@ function obtenerFlotilla() {
       });
     }
     
-    return { ok: true, vehiculos };
+    console.log(`✅ Flotilla cargada: ${vehiculos.length} vehículos`);
+    return { ok: true, vehiculos: vehiculos };
     
   } catch (error) {
-    console.error('❌ Error al obtener flotilla:', error);
+    console.error('❌ Error en obtenerFlotilla:', error);
+    console.error('Stack:', error.stack);
     return { ok: false, error: error.message };
+  }
+}
+function actualizarEstadosFlotilla() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName('🚚_Flotilla_Fallas');
+    if (!sheet) {
+      console.error('❌ No se encontró la hoja de Flotilla');
+      return;
+    }
+    
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const idxEstado = headers.indexOf('ESTADO');
+    const idxEconomico = headers.indexOf('ECONOMICO');
+    
+    // Actualizar cada vehículo con un estado por defecto
+    for (let i = 1; i < data.length; i++) {
+      const fila = data[i];
+      const economico = fila[idxEconomico];
+      
+      // Si el estado está vacío, asignar "Activo" (ID: 1)
+      if (!fila[idxEstado] || fila[idxEstado].toString().trim() === '') {
+        sheet.getRange(i + 1, idxEstado + 1).setValue('1');
+        console.log(`✅ Estado actualizado para ${economico}: Activo`);
+      }
+    }
+    
+    console.log('✅ Todos los estados han sido actualizados');
+    
+  } catch (error) {
+    console.error('❌ Error al actualizar estados:', error);
+  }
+}
+
+function actualizarGpsFlotilla() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const flotillaSheet = ss.getSheetByName('🚚_Flotilla_Fallas');
+    const inventarioSheet = ss.getSheetByName('📦_Inventario_GPS');
+    
+    if (!flotillaSheet || !inventarioSheet) {
+      console.error('❌ No se encontraron las hojas necesarias');
+      return;
+    }
+    
+    const flotillaData = flotillaSheet.getDataRange().getValues();
+    const invData = inventarioSheet.getDataRange().getValues();
+    const invHeaders = invData[0];
+    
+    const idxEconomicoFlotilla = flotillaData[0].indexOf('ECONOMICO');
+    const idxGpsActual = flotillaData[0].indexOf('GPS_ACTUAL');
+    const idxEstado = flotillaData[0].indexOf('ESTADO');
+    
+    const idxSerieInv = invHeaders.indexOf('SERIE_GPS');
+    const idxEcoInv = invHeaders.indexOf('ECONOMICO_ASIGNADO');
+    const idxEstadoInv = invHeaders.indexOf('ESTADO');
+    
+    // Crear mapa de económico -> serie GPS
+    const mapaGPS = {};
+    for (let i = 1; i < invData.length; i++) {
+      const fila = invData[i];
+      const eco = fila[idxEcoInv] ? fila[idxEcoInv].toString().trim() : '';
+      const serie = fila[idxSerieInv] ? fila[idxSerieInv].toString().trim() : '';
+      const estado = fila[idxEstadoInv] ? fila[idxEstadoInv].toString().trim() : '';
+      
+      if (eco && serie && estado === 'Instalado') {
+        mapaGPS[eco] = serie;
+      }
+    }
+    
+    // Actualizar flotilla con las series reales
+    for (let i = 1; i < flotillaData.length; i++) {
+      const fila = flotillaData[i];
+      const eco = fila[idxEconomicoFlotilla] ? fila[idxEconomicoFlotilla].toString().trim() : '';
+      
+      if (eco && mapaGPS[eco]) {
+        sheet.getRange(i + 1, idxGpsActual + 1).setValue(mapaGPS[eco]);
+        console.log(`✅ GPS actualizado para ${eco}: ${mapaGPS[eco]}`);
+      } else if (eco) {
+        // Si no tiene GPS asignado, poner "Sin GPS"
+        const valorActual = fila[idxGpsActual] ? fila[idxGpsActual].toString().trim() : '';
+        if (valorActual === '' || valorActual === 'Pendiente') {
+          // Mantener el valor actual
+        }
+      }
+    }
+    
+    console.log('✅ GPS actualizados correctamente');
+    
+  } catch (error) {
+    console.error('❌ Error al actualizar GPS:', error);
   }
 }

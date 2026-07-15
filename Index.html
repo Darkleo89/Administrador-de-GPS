@@ -616,15 +616,14 @@
           <div class="fm-panel-header">
             <h2><i class="bi bi-truck me-2"></i>🚚 Flotilla</h2>
             <div class="d-flex gap-2">
-              <button class="btn btn-sm btn-info d-none" id="btn-agregar-vehiculo-flotilla" onclick="mostrarFormAgregarVehiculo()">
-        <i class="bi bi-plus-circle me-1"></i>Agregar vehículo
-      </button>
+              <button class="btn btn-primary btn-sm" onclick="mostrarFormAgregarVehiculo()">
+                <i class="bi bi-plus-circle me-1"></i>Agregar vehículo
+              </button>
               <button class="btn btn-outline-secondary btn-sm" onclick="cargarFlotilla()">
-        <i class="bi bi-arrow-repeat me-1"></i>Actualizar
-      </button>
+                <i class="bi bi-arrow-repeat me-1"></i>Actualizar
+              </button>
             </div>
           </div>
-
           <!-- 📊 Resumen -->
           <div class="row g-2 mb-3" id="flotilla-resumen">
             <div class="col-6 col-md-2">
@@ -944,37 +943,113 @@
     </div>
   </div>
   <!-- ================================================== -->
-  <!-- MODAL PARA CAMBIAR ESTADO DE VEHÍCULO              -->
+  <!-- MODAL PARA AGREGAR/EDITAR VEHÍCULO EN FLOTILLA    -->
   <!-- ================================================== -->
-  <div class="modal fade" id="modal-cambiar-estado" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-sm modal-dialog-centered">
+  <div class="modal fade" id="modal-vehiculo-flotilla" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
       <div class="modal-content">
         <div class="modal-header">
           <h5 class="modal-title">
-            <i class="bi bi-truck me-2"></i>Cambiar Estado
+            <i class="bi bi-truck me-2"></i>
+            <span id="modal-vehiculo-titulo">Agregar Vehículo</span>
           </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <p class="text-muted small">
-            Selecciona el nuevo estado para el vehículo <strong id="modal-estado-economico"></strong>:
-          </p>
+          <form id="form-vehiculo-flotilla">
+            <div class="row g-3">
+              <!-- Económico -->
+              <div class="col-12 col-md-6">
+                <label class="form-label required">Económico</label>
+                <input type="text" id="modal-vehiculo-economico" class="form-control"
+                       placeholder="Ej: G-361" required>
+              </div>
 
-          <div class="mb-3">
-            <label class="form-label fw-bold">Estado del vehículo</label>
-            <select id="selector-estado-flotilla" class="form-select">
-              <option value="">Cargando estados...</option>
-            </select>
-            <div class="form-text">
-              Los colores indican el estatus actual del vehículo en el sistema.
+              <!-- Placas -->
+              <div class="col-12 col-md-6">
+                <label class="form-label required">Placas</label>
+                <input type="text" id="modal-vehiculo-placas" class="form-control"
+                       placeholder="Ej: ABC-123-X" required>
+              </div>
+
+              <!-- Tipo de Vehículo -->
+              <div class="col-12 col-md-4">
+                <label class="form-label">Tipo de Vehículo</label>
+                <select id="modal-vehiculo-tipo" class="form-select">
+                  <option value="">Seleccionar...</option>
+                  <option value="UTILITARIA">Utilitaria</option>
+                  <option value="CAMION">Camión</option>
+                  <option value="VAN">Van</option>
+                  <option value="PICKUP">Pickup</option>
+                  <option value="AUTOMOVIL">Automóvil</option>
+                  <option value="TRACTOCAMION">Tractocamión</option>
+                  <option value="REMOLQUE">Remolque</option>
+                </select>
+              </div>
+
+              <!-- Marca -->
+              <div class="col-12 col-md-4">
+                <label class="form-label">Marca</label>
+                <input type="text" id="modal-vehiculo-marca" class="form-control"
+                       placeholder="Ej: Ford">
+              </div>
+
+              <!-- Modelo -->
+              <div class="col-12 col-md-4">
+                <label class="form-label">Modelo</label>
+                <input type="text" id="modal-vehiculo-modelo" class="form-control"
+                       placeholder="Ej: F-350">
+              </div>
+
+              <!-- Año -->
+              <div class="col-12 col-md-4">
+                <label class="form-label">Año</label>
+                <input type="number" id="modal-vehiculo-ano" class="form-control"
+                       placeholder="2024" min="1990" max="2025">
+              </div>
+
+              <!-- Tipo de Unidad -->
+              <div class="col-12 col-md-4">
+                <label class="form-label">Tipo de Unidad</label>
+                <select id="modal-vehiculo-tipo-unidad" class="form-select">
+                  <option value="">Seleccionar...</option>
+                  <option value="UNIDAD">Unidad</option>
+                  <option value="UTILITARIA">Utilitaria</option>
+                  <option value="CAJA SECA">Caja Seca</option>
+                  <option value="MÓVIL">Móvil</option>
+                  <option value="DOLLY">Dolly</option>
+                  <option value="REMOLQUE">Remolque</option>
+                  <option value="TRAILER">Trailer</option>
+                </select>
+              </div>
+
+              <!-- Estado -->
+              <div class="col-12 col-md-4">
+                <label class="form-label required">Estado</label>
+                <select id="modal-vehiculo-estado" class="form-select" required>
+                  <option value="">Seleccionar estado...</option>
+                  <!-- Se llena dinámicamente -->
+                </select>
+              </div>
+
+              <!-- Serie Vehículo -->
+              <div class="col-12">
+                <label class="form-label">Serie del Vehículo (VIN)</label>
+                <input type="text" id="modal-vehiculo-serie" class="form-control"
+                       placeholder="Ej: 1FT8W3BT9PED12345"
+                       oninput="this.value=this.value.toUpperCase()">
+              </div>
+
+              <!-- Campos ocultos para el modo edición -->
+              <input type="hidden" id="modal-vehiculo-editando" value="false">
             </div>
-          </div>
+          </form>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
             <i class="bi bi-x me-1"></i>Cancelar
           </button>
-          <button type="button" class="btn btn-primary" onclick="cambiarEstadoVehiculo()">
+          <button type="button" class="btn btn-primary" onclick="guardarVehiculoFlotilla()">
             <i class="bi bi-check me-1"></i>Guardar
           </button>
         </div>
