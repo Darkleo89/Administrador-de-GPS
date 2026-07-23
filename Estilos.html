@@ -253,4 +253,166 @@ body { margin: 0; font-family: 'Segoe UI', system-ui, sans-serif;
   color: #004085;
   border: 1px solid #93c5fd;
 }
+/* ── Administrador de estados ── */
+#estado-form-container {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+#estado-form-container .form-label {
+  font-weight: 600;
+  color: #475569;
+}
+
+#estados-list-container .table th {
+  background: #f1f5f9;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #475569;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+#estados-list-container .table td {
+  vertical-align: middle;
+  font-size: 13px;
+}
+
+#estados-list-container .badge {
+  font-size: 11px;
+  padding: 4px 8px;
+  font-weight: 500;
+  text-align: center;
+}
+
+#estados-list-container .btn-sm {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+#estados-list-container tr.text-muted td {
+  opacity: 0.6;
+}
+
+#estados-list-container tr.text-muted td strong {
+  font-weight: 400;
+  text-decoration: line-through;
+}
+
+#estados-list-container .table-responsive {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* Estado badge preview en la tabla */
+.estado-preview-dot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.1);
+  vertical-align: middle;
+  margin-right: 6px;
+}
+/* ── Dashboard mejorado ── */
+
+/* Tarjetas con efecto hover */
+.dashboard-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: default;
+}
+.dashboard-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+.dashboard-card .h5 {
+  font-weight: 700;
+  font-size: 1.4rem;
+}
+
+/* ── Alertas del sistema ── */
+#alertas-container .alert {
+  border-radius: 8px;
+  font-size: 0.9rem;
+  padding: 0.5rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#alertas-container .alert .btn-close {
+  position: relative;
+  top: auto;
+  right: auto;
+  padding: 0.5rem;
+  margin-left: 8px;
+  font-size: 0.7rem;
+  opacity: 0.6;
+}
+#alertas-container .alert .btn-close:hover {
+  opacity: 1;
+}
+#alertas-container .alert .btn-sm {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+}
+
+/* Acciones rápidas */
+.acciones-rapidas .btn {
+  border-radius: 20px;
+  padding: 0.35rem 1rem;
+  font-weight: 500;
+}
+
+#alertas-container .alert .alert-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#alertas-container .alert .alert-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Filtro de fecha */
+#filtro-fecha-dashboard {
+  border-radius: 20px;
+  font-size: 0.8rem;
+  padding: 0.2rem 0.8rem;
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+/* Tendencias en tarjetas */
+.dashboard-card .small .text-success {
+  font-weight: 600;
+}
+.dashboard-card .small .text-danger {
+  font-weight: 600;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .dashboard-card .h5 {
+    font-size: 1.1rem;
+  }
+  .acciones-rapidas .btn {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.6rem;
+  }
+  #filtro-fecha-dashboard {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.5rem;
+  }
+}
 </style>
