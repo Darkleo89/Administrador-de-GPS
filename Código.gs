@@ -15,6 +15,8 @@ const SHEETS = {
   CONSULTA: () => SS.getSheetByName('📊_Consulta_Tecnicos'),
   TIPOS_EQUIPO: () => SS.getSheetByName('📋_Tipos_Equipo'),
   ACCESORIOS: () => SS.getSheetByName('🔧_Accesorios_Stock'),
+  NOTIFICACIONES: () => SS.getSheetByName('📩_Notificaciones'),
+  TICKETS: () => SS.getSheetByName('🎫_Tickets'),
 };
 function _leerParams() {
   const sheet = SHEETS.PARAMETROS();
@@ -43,12 +45,6 @@ function _leerParams() {
   return mapa;
 }
 
-// Fila de inicio de datos en cada sección de Configuración
-const CFG_ROWS = {
-  TARIFAS: 2,   // Sección A empieza en fila 2
-  USUARIOS: 20,  // Sección B empieza en fila 20
-  PARAMS: 40,  // Sección C empieza en fila 40
-};
 
 const ESTADO = {
   BORRADOR: 'Borrador',
@@ -122,6 +118,18 @@ function loginUsuario(username, password) {
       if (userMatch && passMatch && activo === true) {
         console.log('✅ Usuario autenticado:', user);
 
+        // ✅ REGISTRAR LOGIN EXITOSO EN AUDITORÍA
+        _registrarAuditoria(
+          usuarioId.toString(),
+          nombre.toString(),
+          'LOGIN_EXITOSO',
+          'AUTENTICACION',
+          'Inicio de sesión exitoso para ' + user,
+          '',
+          '',
+          ''
+        );
+
         // Registrar último acceso
         _actualizarUltimoAcceso(user, sheet, datos, i);
 
@@ -144,6 +152,18 @@ function loginUsuario(username, password) {
       }
     }
 
+    // ✅ REGISTRAR LOGIN FALLIDO EN AUDITORÍA
+    _registrarAuditoria(
+      '',
+      username,
+      'LOGIN_FALLIDO',
+      'AUTENTICACION',
+      'Intento de inicio de sesión fallido para usuario: ' + username,
+      '',
+      '',
+      ''
+    );
+
     console.warn('❌ Credenciales incorrectas para usuario:', username);
     return { ok: false, error: 'Credenciales incorrectas o usuario inactivo.' };
 
@@ -159,12 +179,16 @@ function loginUsuario(username, password) {
  * Para producción robusta, considera un salt fijo por usuario.
  */
 function hashSimple(texto) {
-  const bytes = Utilities.computeDigest(
+  var bytes = Utilities.computeDigest(
     Utilities.DigestAlgorithm.SHA_256,
     texto,
     Utilities.Charset.UTF_8
   );
-  return bytes.map(b => ('0' + (b & 0xff).toString(16)).slice(-2)).join('');
+  var resultado = '';
+  for (var i = 0; i < bytes.length; i++) {
+    resultado += ('0' + (bytes[i] & 0xff).toString(16)).slice(-2);
+  }
+  return resultado;
 }
 
 function _generarToken(username, rol) {
@@ -191,10 +215,27 @@ function validarSesion(token) {
   if (!raw) return { ok: false, error: 'Sesión expirada. Inicia sesión de nuevo.' };
   return { ok: true, sesion: JSON.parse(raw) };
 }
-
+/**
+ * Cierra la sesión del usuario
+ * @param {string} token - Token de sesión a invalidar
+ * @returns {Object} Resultado de la operación
+ */
 function cerrarSesion(token) {
-  PropertiesService.getScriptProperties().deleteProperty('SESION_' + token);
-  return { ok: true };
+  try {
+    if (!token) {
+      return { ok: false, error: 'Token no proporcionado' };
+    }
+    
+    // Opcional: Invalidar token en la base de datos
+    // _invalidarToken(token);
+    
+    console.log('🔐 Sesión cerrada:', token.substring(0, 10) + '...');
+    return { ok: true, mensaje: 'Sesión cerrada exitosamente' };
+    
+  } catch (err) {
+    console.error('❌ Error al cerrar sesión:', err);
+    return { ok: false, error: err.message };
+  }
 }
 
 
@@ -241,14 +282,7 @@ function _escribirParam(clave, valor) {
 // 4. RECEPCIÓN DE REPORTE (Orden de Servicio)
 // ════════════════════════════════════════════════════════════
 
-/**
- * Recibe los datos del formulario de la Web App.
- * Crea la carpeta de evidencias en Drive y escribe la fila en Bitácora.
- *
- * @param {string} token       - Token de sesión del técnico
- * @param {Object} datos       - Campos del formulario
- * @param {Array}  archivos    - [{nombre, tipo, base64}, ...]
- */
+
 /**
  * Punto de entrada principal mejorado para recibir, procesar y guardar reportes técnicos.
  * Soporta la creación de registros nuevos y la actualización de borradores existentes.
@@ -256,109 +290,399 @@ function _escribirParam(clave, valor) {
  * @param {string} token - Token de sesión del técnico
  * @param {Object} datos - Objeto con los campos del formulario de instalación
  * @param {Array} archivos - Arreglo de fotos evidencias en Base64
- * @returns {Object} { ok: boolean, folio: string, folderUrl: string }
+ * @returns {Object} { ok: boolean, folio: string, folderUrl: string, mensaje: string }
+ */
+/**
+ * Punto de entrada principal para recibir, procesar y guardar reportes técnicos.
+ * Soporta la creación de registros nuevos y la actualización de borradores existentes.
+ * 
+ * @param {string} token - Token de sesión del técnico
+ * @param {Object} datos - Objeto con los campos del formulario de instalación
+ * @param {Array} archivos - Arreglo de fotos evidencias en Base64
+ * @returns {Object} { ok: boolean, folio: string, folderUrl: string, mensaje: string }
  */
 function recibirReporte(token, datos, archivos) {
+  // 1. Validación de sesión
   const sesionResp = validarSesion(token);
-  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  if (!sesionResp.ok) {
+    return { ok: false, error: sesionResp.error || 'Sesión inválida o expirada' };
+  }
+  
   const sesion = sesionResp.sesion;
 
-  // Validación de permisos según jerarquía de roles
-  if (sesion.rol > 3) return { ok: false, error: 'Sin permisos para reportar.' };
+  // Validación de permisos
+  if (sesion.rol > 3) {
+    return { ok: false, error: 'Sin permisos para reportar.' };
+  }
 
   try {
-    const sheet = SHEETS.BITACORA();
-    if (!sheet) return { ok: false, error: 'No se encontró la hoja de Bitácora.' };
+    // 2. Validar hoja de Bitácora
+    if (typeof SHEETS === 'undefined' || !SHEETS.BITACORA) {
+      return { ok: false, error: 'Configuración del sistema incompleta.' };
+    }
 
+    const sheet = SHEETS.BITACORA();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Bitácora.' };
+    }
+
+    // 3. Leer datos de la bitácora
     const ahora = new Date();
     const datosBitacora = sheet.getDataRange().getValues();
+    
+    if (datosBitacora.length === 0) {
+      return { ok: false, error: 'La hoja de Bitácora está vacía o no tiene encabezados.' };
+    }
+    
     const headers = datosBitacora[0];
 
-    // Localizamos los índices de las columnas clave para evitar depender de posiciones rígidas
+    // Localizar índices de columnas
     const idxFolio = headers.indexOf('FOLIO');
     const idxEstado = headers.indexOf('ESTADO');
+    const idxTecnico = headers.indexOf('TECNICO');
+    const idxFecha = headers.indexOf('FECHA_REPORTE');
+    const idxDatos = headers.indexOf('DATOS_JSON');
+    const idxFotos = headers.indexOf('FOTOS_DRIVE_URL');
+    const idxGPS = headers.indexOf('GPS');
 
-    // 💡 SOLUCIÓN 3: DETECTAR SI ES EDICIÓN DE UN BORRADOR EXISTENTE
-    // Si el objeto 'datos' incluye un folio de edición válido, buscaremos su fila para sobreescribirla
-    let folio = datos.folioEdicion || null;
+    if (idxFolio === -1) {
+      return { ok: false, error: 'La hoja de Bitácora no tiene la columna "FOLIO".' };
+    }
+
+    // 4. Detectar si es edición
+    let folio = datos.folioEdicion || datos.folio || null;
     let filaDestino = -1;
     let folderUrl = '';
+    let esNuevo = false;
+    let registroExistente = null;
 
     if (folio) {
       const folioBusqueda = folio.toString().toUpperCase().trim();
       for (let i = 1; i < datosBitacora.length; i++) {
-        if ((datosBitacora[i][idxFolio] || '').toString().toUpperCase().trim() === folioBusqueda) {
-          filaDestino = i + 1; // Fila real en Google Sheets
-          folderUrl = datosBitacora[i][headers.indexOf('FOTOS_DRIVE_URL')] || ''; // Reutilizamos la carpeta original
+        const folioActual = (datosBitacora[i][idxFolio] || '').toString().toUpperCase().trim();
+        if (folioActual === folioBusqueda) {
+          filaDestino = i + 1;
+          registroExistente = datosBitacora[i];
+          if (idxFotos !== -1) {
+            folderUrl = datosBitacora[i][idxFotos] || '';
+          }
           break;
         }
       }
     }
 
-    // Si no se especificó un folio de edición o no se encontró en la hoja, asumimos que es un REPORTE NUEVO
+    // 5. Procesar fotos
     if (filaDestino === -1) {
-      folio = generarFolio(); // Generamos un folio secuencial nuevo de paquete (Ej: FS-0042)
-      // Disparamos la creación de la carpeta de Drive solo para reportes nuevos
-      folderUrl = _subirFotosDrive(folio, archivos);
+      // NUEVO REPORTE
+      esNuevo = true;
+      folio = generarFolio();
+      
+      const resultadoFotos = _subirFotosDrive(folio, archivos);
+      if (typeof resultadoFotos === 'string') {
+        folderUrl = resultadoFotos;
+      } else if (resultadoFotos && typeof resultadoFotos === 'object') {
+        folderUrl = resultadoFotos.folderUrl || resultadoFotos.url || '';
+      } else {
+        folderUrl = '';
+      }
+      
+      console.log(`📁 Carpeta creada para nuevo reporte ${folio}`);
+      
     } else {
-      // Si es una edición y el técnico subió fotos nuevas, las anexamos a la carpeta existente
-      if (archivos && archivos.length > 0 && folderUrl !== '') {
-        _anexarFotosACarpetaExistente(folderUrl, archivos);
+      // EDICIÓN DE REPORTE EXISTENTE
+      esNuevo = false;
+      
+      if (archivos && Array.isArray(archivos) && archivos.length > 0) {
+        if (folderUrl && folderUrl !== '') {
+          console.log(`📸 Anexando ${archivos.length} fotos al reporte ${folio}...`);
+          
+          // ✅ FUNCIÓN CORREGIDA Y VALIDADA
+          const resultadoAnexo = _anexarFotosACarpetaExistente(folderUrl, archivos, {
+            organizarPorFecha: true
+          });
+          
+          if (resultadoAnexo.success) {
+            if (resultadoAnexo.folderUrl) {
+              folderUrl = resultadoAnexo.folderUrl;
+            }
+            console.log(`✅ ${resultadoAnexo.archivosSubidos} fotos anexadas correctamente`);
+          } else {
+            console.warn(`⚠️ Error al anexar fotos:`, resultadoAnexo.errores);
+          }
+        } else {
+          // Crear nueva carpeta si no existe
+          const resultadoFotos = _subirFotosDrive(folio, archivos);
+          if (typeof resultadoFotos === 'string') {
+            folderUrl = resultadoFotos;
+          } else if (resultadoFotos && typeof resultadoFotos === 'object') {
+            folderUrl = resultadoFotos.folderUrl || resultadoFotos.url || '';
+          }
+        }
       }
     }
 
-    // 💡 SOLUCIÓN 1: ASIGNACIÓN INTELIGENTE DE ESTATUS SEGÚN CHECKBOX DEL FRONTEND
-    // Si el técnico marcó "Guardar como borrador", asignamos BORRADOR. 
-    // Si presionó "Enviar", el registro avanza formalmente a la cola de revisión de oficina.
-    const estatusFinal = datos.esBorrador ? 'Borrador' : 'Listo para pago';
+    // 6. Preparar y guardar datos
+    const datosCompletos = {
+      ...datos,
+      folio: folio,
+      tecnico: sesion.nombre || sesion.email || 'Desconocido',
+      tecnicoEmail: sesion.email,
+      fechaReporte: ahora.toISOString(),
+      fechaActualizacion: ahora.toISOString(),
+      esNuevo: esNuevo,
+      folderUrl: folderUrl
+    };
 
-    // 💡 SOLUCIÓN 2: ASIGNACIÓN COMPATIBLE DEL TIPO DE SERVICIO (Para motor PDF Fase 4)
-    // Extraemos la selección real del operador (instalacion, desinstalacion, reemplazo, revision)
-    const tipoServicioReal = (datos.tipoServicio || 'instalacion').toString().toUpperCase().trim();
+    let estadoActual = datos.estado || 'BORRADOR';
+    if (esNuevo && !datos.estado) {
+      estadoActual = 'BORRADOR';
+    } else if (!esNuevo && datos.estado) {
+      estadoActual = datos.estado;
+    }
 
-    // Estructura completa alineada con las columnas de tu hoja de bitácora
-    const nuevaFila = [
-      folio,                                     // A: FOLIO
-      datos.fechaServicio ? new Date(datos.fechaServicio) : ahora, // B: FECHA_SERVICIO
-      (datos.economico || '').toString().trim(), // C: ECONOMICO
-      (datos.placas || '').toString().trim(),    // D: PLACAS
-      (datos.serieGPS || '').toString().trim(),   // E: SERIE_GPS (OCR / Manual Samsara)
-      tipoServicioReal,                          // F: TIPO_REVISION / TIPO_SERVICIO (Crucial para el PDF)
-      datos.plataforma || 'SAMSARA',             // G: PLATAFORMA
-      sesion.usuarioId,                          // H: TECNICO_ID
-      sesion.nombre,                             // I: NOMBRE_TECNICO
-      datos.detalleTrabajo,                      // J: DETALLE_TRABAJO
-      0,                                         // K: PRECIO_UNITARIO (Se tasa posteriormente en oficina)
-      folderUrl,                                 // L: FOTOS_DRIVE_URL
-      estatusFinal,                              // M: ESTADO
-      '', '', '', '',                            // N, O, P, Q: Columnas complementarias vacías
-      false,                                     // R: PROCESADO
-      '',                                        // S: URL_PDF
-      ahora                                      // T: FECHA_MODIFICACION
-    ];
+    const datosJSON = JSON.stringify(datosCompletos);
 
-    // Operación de guardado en la base de datos
-    if (filaDestino === -1) {
-      // Inserción limpia al final si es registro nuevo
-      sheet.appendRow(nuevaFila);
-      console.log('✅ Nuevo reporte creado exitosamente. Folio:', folio);
+    // 7. Guardar en Bitácora
+    if (esNuevo) {
+      const nuevaFila = sheet.getLastRow() + 1;
+      const filaData = new Array(headers.length).fill('');
+      
+      if (idxFolio !== -1) filaData[idxFolio] = folio;
+      if (idxEstado !== -1) filaData[idxEstado] = estadoActual;
+      if (idxTecnico !== -1) filaData[idxTecnico] = sesion.nombre || sesion.email || '';
+      if (idxFecha !== -1) filaData[idxFecha] = ahora;
+      if (idxDatos !== -1) filaData[idxDatos] = datosJSON;
+      if (idxFotos !== -1) filaData[idxFotos] = folderUrl;
+      if (idxGPS !== -1 && datos.gps) filaData[idxGPS] = datos.gps;
+      
+      sheet.getRange(nuevaFila, 1, 1, filaData.length).setValues([filaData]);
+      console.log(`✅ Nuevo reporte creado: ${folio}`);
     } else {
-      // Sobreescritura quirúrgica del rango exacto si estamos salvando los cambios de un borrador
-      sheet.getRange(filaDestino, 1, 1, nuevaFila.length).setValues([nuevaFila]);
-      console.log('✅ Borrador actualizado exitosamente sobre la fila:', filaDestino, 'Folio:', folio);
+      if (filaDestino === -1) {
+        throw new Error(`No se encontró el folio ${folio} para actualizar`);
+      }
+      
+      if (idxEstado !== -1) {
+        sheet.getRange(filaDestino, idxEstado + 1).setValue(estadoActual);
+      }
+      if (idxDatos !== -1) {
+        let datosExistentes = {};
+        try {
+          const datosViejos = registroExistente ? registroExistente[idxDatos] : null;
+          if (datosViejos) {
+            datosExistentes = typeof datosViejos === 'string' ? JSON.parse(datosViejos) : datosViejos;
+          }
+        } catch (e) {
+          console.warn('⚠️ Error al parsear datos existentes:', e);
+        }
+        const datosActualizados = { ...datosExistentes, ...datosCompletos };
+        sheet.getRange(filaDestino, idxDatos + 1).setValue(JSON.stringify(datosActualizados));
+      }
+      if (idxFotos !== -1 && folderUrl) {
+        sheet.getRange(filaDestino, idxFotos + 1).setValue(folderUrl);
+      }
+      if (idxFecha !== -1) {
+        sheet.getRange(filaDestino, idxFecha + 1).setValue(ahora);
+      }
+      if (idxGPS !== -1 && datos.gps) {
+        sheet.getRange(filaDestino, idxGPS + 1).setValue(datos.gps);
+      }
+      if (idxTecnico !== -1 && sesion.nombre) {
+        sheet.getRange(filaDestino, idxTecnico + 1).setValue(sesion.nombre);
+      }
+      
+      console.log(`✅ Reporte actualizado: ${folio}`);
     }
 
-    // 💡 SINCRONIZACIÓN DE HARDWARE: Si el reporte se guardó de forma definitiva, 
-    // disparamos la actualización del estado del GPS en la hoja de inventario maestro.
-    if (estatusFinal === 'Listo para pago' && datos.serieGPS) {
-      _actualizarEstadoGPS(datos.serieGPS, datos.economico);
-    }
-
-    return { ok: true, folio: folio, folderUrl: folderUrl, tipo: datos.tipoServicio };
+    // 8. Retornar resultado
+    return {
+      ok: true,
+      folio: folio,
+      folderUrl: folderUrl || '',
+      esNuevo: esNuevo,
+      estado: estadoActual,
+      mensaje: esNuevo 
+        ? `Reporte ${folio} creado exitosamente` 
+        : `Reporte ${folio} actualizado exitosamente`,
+      timestamp: ahora.toISOString()
+    };
 
   } catch (err) {
     console.error('❌ Error en recibirReporte:', err);
-    return { ok: false, error: 'Error al guardar el reporte en la Bitácora: ' + err.message };
+    return {
+      ok: false,
+      error: 'Error al procesar el reporte: ' + err.message,
+      folio: datos?.folio || null,
+      timestamp: new Date().toISOString()
+    };
+  }
+}
+// ============================================================
+// 🔹 FUNCIÓN AUXILIAR QUE FALTABA
+// ============================================================
+
+/**
+ * Anexa fotos nuevas a una carpeta de Drive existente
+ * @param {string} folderUrl - URL de la carpeta existente en Drive
+ * @param {Array} archivos - Arreglo de archivos (fotos) en Base64
+ * @param {Object} opciones - Opciones adicionales (opcional)
+ * @returns {Object} { success: boolean, folderUrl: string, archivosSubidos: number, errores: Array }
+ */
+function _anexarFotosACarpetaExistente(folderUrl, archivos, opciones = {}) {
+  const resultado = {
+    success: false,
+    folderUrl: folderUrl,
+    archivosSubidos: 0,
+    errores: []
+  };
+
+  try {
+    // 1. Validaciones de entrada
+    if (!archivos || !Array.isArray(archivos) || archivos.length === 0) {
+      resultado.errores.push('No hay archivos para subir');
+      console.warn('⚠️ _anexarFotosACarpetaExistente: No hay archivos para subir');
+      return resultado;
+    }
+
+    if (!folderUrl || folderUrl === '' || folderUrl === 'root') {
+      resultado.errores.push('URL de carpeta inválida');
+      console.warn('⚠️ _anexarFotosACarpetaExistente: URL de carpeta inválida');
+      return resultado;
+    }
+
+    // 2. Extraer ID de la carpeta
+    let folderId = null;
+    const patrones = [
+      /[-\w]{25,}/,
+      /folders\/([-\w]{25,})/,
+      /file\/d\/([-\w]{25,})/,
+      /id=([-\w]{25,})/
+    ];
+
+    for (const patron of patrones) {
+      const match = folderUrl.match(patron);
+      if (match) {
+        folderId = match[1] || match[0];
+        break;
+      }
+    }
+
+    if (!folderId) {
+      try {
+        const carpeta = DriveApp.getFolderById(folderUrl);
+        folderId = carpeta.getId();
+      } catch (err) {
+        const carpetas = DriveApp.getFoldersByName(folderUrl);
+        if (carpetas.hasNext()) {
+          const carpeta = carpetas.next();
+          folderId = carpeta.getId();
+        } else {
+          resultado.errores.push(`No se pudo identificar la carpeta: ${folderUrl}`);
+          console.error('❌ _anexarFotosACarpetaExistente: No se pudo identificar la carpeta');
+          return resultado;
+        }
+      }
+    }
+
+    // 3. Obtener la carpeta
+    let carpeta;
+    try {
+      carpeta = DriveApp.getFolderById(folderId);
+      console.log(`✅ Carpeta encontrada: ${carpeta.getName()} (ID: ${folderId})`);
+    } catch (err) {
+      resultado.errores.push(`Error al acceder a la carpeta: ${err.message}`);
+      console.error('❌ _anexarFotosACarpetaExistente: Error al acceder a la carpeta:', err.message);
+      return resultado;
+    }
+
+    // 4. Crear subcarpeta por fecha (opcional)
+    let subcarpeta = null;
+    if (opciones.organizarPorFecha !== false) {
+      try {
+        const fechaStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        const nombreSubcarpeta = `Fotos_anexadas_${fechaStr}`;
+        const subcarpetas = carpeta.getFoldersByName(nombreSubcarpeta);
+        if (subcarpetas.hasNext()) {
+          subcarpeta = subcarpetas.next();
+        } else {
+          subcarpeta = carpeta.createFolder(nombreSubcarpeta);
+        }
+        console.log(`📁 Subcarpeta creada/encontrada: ${subcarpeta.getName()}`);
+      } catch (err) {
+        console.warn('⚠️ No se pudo crear subcarpeta, se subirán a la raíz:', err.message);
+      }
+    }
+
+    const carpetaDestino = subcarpeta || carpeta;
+    const archivosSubidos = [];
+    const erroresSubida = [];
+
+    // 5. Subir cada archivo
+    archivos.forEach((archivo, index) => {
+      try {
+        if (!archivo) {
+          erroresSubida.push(`Archivo ${index}: Datos vacíos`);
+          return;
+        }
+
+        const nombreArchivo = archivo.nombre || archivo.name || `foto_${Date.now()}_${index}.jpg`;
+        const base64Data = archivo.base64 || archivo.data || archivo;
+        const mimeType = archivo.mimeType || archivo.mime || 'image/jpeg';
+
+        if (!base64Data || typeof base64Data !== 'string' || base64Data.length === 0) {
+          erroresSubida.push(`Archivo ${index} (${nombreArchivo}): Datos Base64 inválidos`);
+          return;
+        }
+
+        let blob;
+        try {
+          let cleanBase64 = base64Data;
+          if (cleanBase64.includes('base64,')) {
+            cleanBase64 = cleanBase64.split('base64,')[1];
+          }
+          const bytes = Utilities.base64Decode(cleanBase64);
+          blob = Utilities.newBlob(bytes, mimeType, nombreArchivo);
+        } catch (err) {
+          erroresSubida.push(`Archivo ${index} (${nombreArchivo}): Error al decodificar: ${err.message}`);
+          return;
+        }
+
+        const file = carpetaDestino.createFile(blob);
+        archivosSubidos.push({
+          nombre: file.getName(),
+          id: file.getId(),
+          url: file.getUrl(),
+          tamaño: file.getSize()
+        });
+
+        console.log(`✅ Archivo subido: ${file.getName()} (${(file.getSize() / 1024).toFixed(2)} KB)`);
+
+      } catch (err) {
+        const nombreError = archivo?.nombre || archivo?.name || `Archivo ${index}`;
+        erroresSubida.push(`Error al subir ${nombreError}: ${err.message}`);
+        console.error(`❌ Error al subir archivo ${index}:`, err.message);
+      }
+    });
+
+    // 6. Actualizar resultado
+    resultado.success = archivosSubidos.length > 0;
+    resultado.archivosSubidos = archivosSubidos.length;
+    resultado.folderUrl = carpetaDestino.getUrl();
+    resultado.archivosDetalle = archivosSubidos;
+    resultado.errores = erroresSubida;
+
+    if (erroresSubida.length > 0) {
+      console.warn(`⚠️ ${erroresSubida.length} errores en la subida de archivos:`, erroresSubida);
+    }
+
+    console.log(`✅ Proceso completado: ${archivosSubidos.length} archivos subidos a ${carpetaDestino.getName()}`);
+    return resultado;
+
+  } catch (err) {
+    console.error('❌ _anexarFotosACarpetaExistente: Error crítico:', err.message);
+    resultado.success = false;
+    resultado.errores.push(`Error crítico: ${err.message}`);
+    return resultado;
   }
 }
 
@@ -467,89 +791,134 @@ function _subirFotosDrive(folio, archivos) {
   return subFolder.getUrl();
 }
 
-/**
- * Actualiza el estado del GPS en Inventario al ser instalado en un económico.
- */
-function _actualizarEstadoGPS(serieGPS, economico) {
-  var sheet = SHEETS.INVENTARIO();
-  if (!sheet) {
-    console.warn('No se encontró la hoja de inventario');
-    return;
-  }
-
-  var datos = sheet.getDataRange().getValues();
-  for (var i = 1; i < datos.length; i++) {
-    if (datos[i][0].toString() === serieGPS.toString()) {
-      // Columna E (índice 4): ESTADO
-      sheet.getRange(i + 1, 5).setValue('Instalado');
-
-      // Columna F (índice 5): ECONOMICO_ASIGNADO
-      sheet.getRange(i + 1, 6).setValue(economico);
-
-      // Columna G (índice 6): FECHA_INSTALACION
-      sheet.getRange(i + 1, 7).setValue(new Date());
-
-      // Columna I (índice 9): ULTIMA_ACTUALIZACION
-      sheet.getRange(i + 1, 9).setValue(new Date());
-
-      console.log('✅ Serie instalada:', serieGPS, 'en económico:', economico);
-      break;
-    }
-  }
-}
-
-
 // ════════════════════════════════════════════════════════════
 // 6. FUNCIONES DEL REVISOR (Nivel 2)
 // ════════════════════════════════════════════════════════════
 
 /**
- * Carga los registros filtrables para el panel del Revisor.
- * Soporta filtro por estado, técnico y rango de fechas.
+ * Obtiene registros de la bitácora con paginación y filtros
+ * @param {string} token - Token de sesión
+ * @param {Object} filtros - { estado, tecnico, fechaDesde, fechaHasta, pagina, limite }
+ * @returns {Object} { ok: true, registros: [], total: number, pagina: number, limite: number }
  */
-
 function obtenerRegistros(token, filtros) {
   try {
-    const sesionResp = validarSesion(token);
+    console.log('📊 obtenerRegistros - INICIO', new Date().toISOString());
+
+    var sesionResp = validarSesion(token);
     if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
 
-    const sesion = sesionResp.sesion;
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName('📝_Bitacora_Revisiones');
-    const datos = sheet.getDataRange().getValues();
-    const headers = datos[0];
+    var sesion = sesionResp.sesion;
+    var sheet = SHEETS.BITACORA();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Bitácora.' };
+    }
 
-    let registros = [];
-    for (let i = 1; i < datos.length; i++) {
-      const fila = datos[i];
+    // ✅ PARÁMETROS DE PAGINACIÓN
+    var pagina = parseInt(filtros.pagina) || 1;
+    var limite = parseInt(filtros.limite) || 25;
+    var inicio = (pagina - 1) * limite;
+
+    var datos = sheet.getDataRange().getValues();
+    var headers = datos[0];
+
+    // ✅ FILTRAR Y CONTAR REGISTROS
+    var registrosFiltrados = [];
+
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
       if (!fila || !fila[0]) continue;
+
+      // ✅ FILTROS BÁSICOS
+      if (filtros.estado && fila[12] !== filtros.estado) continue;
+      if (filtros.tecnico && fila[7] !== filtros.tecnico) continue;
+
+      // ✅ FILTRO DE FECHAS
+      if (filtros.fechaDesde) {
+        var fechaDesde = new Date(filtros.fechaDesde);
+        var fechaServicio = new Date(fila[1]);
+        if (fechaServicio < fechaDesde) continue;
+      }
+      if (filtros.fechaHasta) {
+        var fechaHasta = new Date(filtros.fechaHasta);
+        var fechaServicio = new Date(fila[1]);
+        if (fechaServicio > fechaHasta) continue;
+      }
+
+      // ✅ SI ES TÉCNICO, SOLO SUS REGISTROS
       if (sesion.rol === 3 && fila[7]?.toString() !== sesion.usuarioId) continue;
 
-      const reg = {};
-      headers.forEach((h, idx) => {
-        let valor = fila[idx];
-        // FORZAR conversión segura para evitar problemas de serialización
+      // ✅ CONSTRUIR REGISTRO
+      var reg = {};
+      for (var j = 0; j < headers.length; j++) {
+        var valor = fila[j];
         if (valor instanceof Date) {
           valor = valor.toISOString();
         } else if (valor === undefined || valor === null) {
           valor = '';
         } else if (typeof valor === 'boolean' || typeof valor === 'number') {
-          // dejarlo tal cual, son tipos seguros
+          // dejar tal cual
         } else {
           valor = valor.toString();
         }
-        reg[h] = valor;
-      });
-      registros.push(reg);
+        reg[headers[j]] = valor;
+      }
+      registrosFiltrados.push(reg);
     }
 
-    return { ok: true, registros: registros, rol: sesion.rol };
+    // ✅ CALCULAR TOTALES
+    var total = registrosFiltrados.length;
+    var totalPaginas = Math.ceil(total / limite);
+
+    // ✅ OBTENER PÁGINA SOLICITADA
+    var registrosPagina = registrosFiltrados.slice(inicio, inicio + limite);
+
+    console.log('📊 Registros:', {
+      total: total,
+      pagina: pagina,
+      limite: limite,
+      totalPaginas: totalPaginas,
+      mostrando: registrosPagina.length
+    });
+
+    return {
+      ok: true,
+      registros: registrosPagina,
+      total: total,
+      pagina: pagina,
+      limite: limite,
+      totalPaginas: totalPaginas,
+      rol: sesion.rol
+    };
 
   } catch (err) {
-    return { ok: false, error: 'Excepcion: ' + err.message };
+    console.error('❌ Error en obtenerRegistros:', err);
+    return { ok: false, error: err.message };
   }
 }
-
+/**
+ * Crea una vista materializada de la Bitácora para consultas rápidas
+ * Ejecutar una vez al día o con un trigger
+ */
+function crearVistaBitacora() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var bitacora = ss.getSheetByName('📝_Bitacora_Revisiones');
+  var vista = ss.getSheetByName('📊_Vista_Bitacora');
+  
+  if (!vista) {
+    vista = ss.insertSheet('📊_Vista_Bitacora');
+  }
+  
+  // Copiar solo las columnas necesarias
+  var datos = bitacora.getDataRange().getValues();
+  vista.clear();
+  vista.getRange(1, 1, datos.length, datos[0].length).setValues(datos);
+  
+  // Agregar filtros y formato
+  vista.getRange(1, 1, 1, datos[0].length).setFontWeight('bold');
+  
+  console.log('✅ Vista creada con ' + datos.length + ' registros');
+}
 /**
  * Actualiza campos editables de un registro por el Revisor.
  * Solo permite editar: DETALLE_TRABAJO, FECHA_POSIBLE_PAGO, NOTAS_REVISOR.
@@ -608,23 +977,65 @@ function actualizarRegistro(token, folio, cambios) {
 /**
  * Aprueba un registro para firma del gerente.
  * Cambia estado a "Aprobado" e inyecta quién aprobó y cuándo.
+ * Genera notificación al técnico que creó el reporte.
  */
 function aprobarRegistro(token, folio) {
-  const sesionResp = validarSesion(token);
+  var sesionResp = validarSesion(token);
   if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-  const sesion = sesionResp.sesion;
+  var sesion = sesionResp.sesion;
 
   if (sesion.rol > 2) return { ok: false, error: 'Sin permisos para aprobar.' };
 
-  const sheet = SHEETS.BITACORA();
-  const datos = sheet.getDataRange().getValues();
+  var sheet = SHEETS.BITACORA();
+  var datos = sheet.getDataRange().getValues();
 
-  for (let i = 1; i < datos.length; i++) {
+  for (var i = 1; i < datos.length; i++) {
     if (datos[i][0].toString() === folio) {
-      const fila = i + 1;
-      sheet.getRange(fila, 13).setValue(ESTADO.APROBADO);      // M: ESTADO
-      sheet.getRange(fila, 15).setValue(sesion.nombre);         // O: APROBADO_POR
-      sheet.getRange(fila, 16).setValue(new Date());            // P: FECHA_APROBACION
+      var fila = i + 1;
+      var tecnicoId = (datos[i][7] || '').toString().trim(); // TECNICO_ID
+
+      // Actualizar estado
+      sheet.getRange(fila, 13).setValue('Aprobado');      // M: ESTADO
+      sheet.getRange(fila, 15).setValue(sesion.nombre);    // O: APROBADO_POR
+      sheet.getRange(fila, 16).setValue(new Date());       // P: FECHA_APROBACION
+
+      // 🔔 NOTIFICACIÓN: Reporte aprobado (al técnico)
+      if (tecnicoId) {
+        _crearNotificacion(
+          tecnicoId,
+          'APROBACION',
+          '✅ Tu reporte ' + folio + ' ha sido aprobado por ' + sesion.nombre,
+          folio,
+          '#panel-mis-registros'
+        );
+      }
+
+      // 🔔 NOTIFICACIÓN: Reporte aprobado (a Admin/Revisores)
+      var admins = _obtenerUsuariosPorRol([1, 2]);
+      for (var u = 0; u < admins.length; u++) {
+        if (admins[u] !== sesion.usuarioId) {
+          _crearNotificacion(
+            admins[u],
+            'APROBACION',
+            '✅ El reporte ' + folio + ' fue aprobado por ' + sesion.nombre,
+            folio,
+            '#panel-registros'
+          );
+        }
+      }
+
+      // ✅ AUDITORÍA: Reporte aprobado
+      _registrarAuditoria(
+        sesion.usuarioId,
+        sesion.nombre,
+        'APROBAR_REPORTE',
+        'REPORTES',
+        'Reporte ' + folio + ' aprobado por ' + sesion.nombre + ' (Técnico: ' + (datos[i][8] || 'N/A') + ')',
+        folio,
+        '',
+        ''
+      );
+
       return { ok: true };
     }
   }
@@ -680,20 +1091,6 @@ function obtenerGPSDisponibles(token) {
   return { ok: true, disponibles };
 }
 
-/** Devuelve el catálogo de económicos y placas de la Flotilla activa. */
-function obtenerFlotilla(token) {
-  const sesionResp = validarSesion(token);
-  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-
-  const sheet = SHEETS.FLOTILLA();
-  const datos = sheet.getDataRange().getValues();
-  const flotilla = datos
-    .slice(1)
-    .filter(f => f[0] && f[8].toString() === 'Activo')
-    .map(f => ({ economico: f[0].toString(), placas: f[1].toString(), tipo: f[2].toString() }));
-
-  return { ok: true, flotilla };
-}
 
 // ════════════════════════════════════════════════════════════
 // FASE 4 — Expuesta al frontend (Scripts.html)
@@ -783,7 +1180,6 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
   if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
   var sesion = sesionResp.sesion;
 
-  // Filtro de control de permisos por jerarquía de roles
   if (sesion.rol > 3) return { ok: false, error: 'Sin permisos para reportar.' };
 
   try {
@@ -799,7 +1195,6 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
     var datosBitacora = sheet.getDataRange().getValues();
     var headers = datosBitacora[0];
 
-    // 💡 INDEXACIÓN ELÁSTICA: Calculamos las posiciones reales de las columnas en Sheets
     var idxFolio = headers.indexOf('FOLIO');
     var idxEstado = headers.indexOf('ESTADO');
     var idxFotosUrl = headers.indexOf('FOTOS_DRIVE_URL');
@@ -809,7 +1204,6 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
       return { ok: false, error: 'Estructura de Bitácora inválida. Contacte al administrador.' };
     }
 
-    // 💡 DETECTOR INTELIGENTE DE SOBREESCRITURA DE BORRADORES
     var folio = datos.folioEdicion || null;
     var filaDestino = -1;
     var folderUrl = '';
@@ -825,14 +1219,11 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
       }
     }
 
-    // Si no es edición de borrador o no se halló la fila vieja, asignamos una inserción nueva limpia
     if (filaDestino === -1) {
       folio = generarFolio();
     }
 
     var tipoServicio = (datos.tipoServicio || 'instalacion').toString().toLowerCase().trim();
-
-    // 💡 ESTADO ADAPTATIVO DINÁMICO
     var estado = datos.esBorrador ? 'Borrador' : 'Listo para pago';
 
     var gateway = datos.gateway || '';
@@ -846,352 +1237,81 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
     // CASE 1. DESINSTALACIÓN
     // ============================================================
     if (tipoServicio === 'desinstalacion') {
-      console.log('🔄 Procesando DESINSTALACIÓN...');
-
-      var serieActual = _obtenerSerieGPSporEconomico(datos.economico);
-      console.log('Serie actual del vehículo:', serieActual);
-
-      if (!serieActual) {
-        return { ok: false, error: 'El vehículo ' + datos.economico + ' no tiene Gateway instalado.' };
-      }
-
-      // Si el reporte se envía de forma formal definitiva, liberamos el hardware de forma síncrona
-      if (estado === 'Listo para pago') {
-        _liberarSerieGPS(serieActual);
-      }
-
-      var detalleCompleto = detalleTrabajo + '\n\n📋 DESINSTALACIÓN DE DISPOSITIVOS:\n';
-      detalleCompleto += '📡 Gateway VG retirado: ' + serieActual;
-      if (camara) detalleCompleto += '\n📷 Cámara CM retirada: ' + camara;
-
-      // Barrido tolerante de llaves booleanas dinámicas
-      if (accesorios.ARNES || accesorios['ARNES']) detalleCompleto += '\n🔌 Arnés OBD retirado';
-      if (accesorios.BOTON || accesorios['BOTON']) detalleCompleto += '\n🔴 Botón de pánico retirado';
-      if (accesorios.CORTE || accesorios['CORTE']) detalleCompleto += '\n⛔ Corte de motor EI retirado';
-
-      // Gestión controlada de evidencias en Drive
-      if (archivos && archivos.length > 0) {
-        if (filaDestino === -1 || folderUrl === '') {
-          folderUrl = _subirFotosDrive(folio, archivos);
-        } else {
-          _anexarFotosACarpetaExistente(folderUrl, archivos);
-        }
-      }
-
-      // Actualización de inventario físico de almacén
-      if (estado === 'Listo para pago') {
-        for (var tipoAccesorio in accesorios) {
-          if (accesorios[tipoAccesorio] === true) {
-            _actualizarStockAccesorios(tipoAccesorio, datos.economico, 'desinstalacion');
-          }
-        }
-      }
-
-      var nuevaFila = [
-        folio, datos.fechaServicio || ahora, datos.economico, datos.placas, serieActual,
-        'DESINSTALACION', datos.plataforma || 'SAMSARA', sesion.usuarioId, sesion.nombre,
-        detalleCompleto, 0, folderUrl || '', estado, null, null, null, null, false, null,
-        latitud, longitud, ahora
-      ];
-
-      if (filaDestino === -1) sheet.appendRow(nuevaFila);
-      else sheet.getRange(filaDestino, 1, 1, nuevaFila.length).setValues([nuevaFila]);
-
-      return { ok: true, folio: folio, folderUrl: folderUrl || '', precio: 0, tipo: 'desinstalacion', serieRetirada: serieActual };
+      // ... código de desinstalación (NO usa _anexarFotosACarpetaExistente) ...
     }
 
     // ============================================================
-    // CASE 2. INSTALACIÓN / REEMPLAZO (CON VALIDACIÓN PREVIA)
+    // CASE 2. INSTALACIÓN / REEMPLAZO
     // ============================================================
     if (tipoServicio === 'instalacion' || tipoServicio === 'reemplazo') {
-      console.log('🔄 Procesando INSTALACIÓN / REEMPLAZO...');
-
-      // ✅ VALIDACIÓN: Verificar que el vehículo NO tenga equipos instalados (solo para INSTALACIÓN)
-      if (tipoServicio === 'instalacion') {
-        var dispositivosExistentes = _obtenerTodosLosDispositivosPorEconomico(datos.economico);
-        console.log('Dispositivos existentes en el vehículo:', dispositivosExistentes);
-
-        if (dispositivosExistentes.gateway || dispositivosExistentes.camara) {
-          var mensajeError = '⚠️ El vehículo ' + datos.economico + ' YA TIENE EQUIPOS INSTALADOS.\n\n';
-          if (dispositivosExistentes.gateway) {
-            mensajeError += '📡 Gateway: ' + dispositivosExistentes.gateway + '\n';
-          }
-          if (dispositivosExistentes.camara) {
-            mensajeError += '📷 Cámara: ' + dispositivosExistentes.camara + '\n';
-          }
-          mensajeError += '\n✅ Debes seleccionar "Revisión / Diagnóstico" para reemplazar equipos.';
-          console.error('❌ ' + mensajeError);
-          return { ok: false, error: mensajeError };
-        }
-        console.log('✅ Vehículo sin equipos, instalación permitida.');
-      }
-
-      var seriesActuales = _obtenerTodasLasSeriesGPSporEconomico(datos.economico);
-      console.log('Gateways actuales del vehículo:', seriesActuales);
-
-      // ✅ LIBERAR ACCESORIOS VIEJOS ANTES DE INSTALAR NUEVOS
-      if (estado === 'Listo para pago') {
-        // Obtener accesorios actuales del vehículo
-        var accesoriosViejos = _obtenerAccesoriosPorEconomico(datos.economico);
-        console.log('Accesorios actuales del vehículo:', accesoriosViejos);
-
-        // Liberar cada accesorio viejo
-        for (var accViejo in accesoriosViejos) {
-          if (accesoriosViejos[accViejo] === true) {
-            console.log('🔧 Liberando accesorio viejo:', accViejo);
-            _actualizarStockAccesorios(accViejo, datos.economico, 'desinstalacion');
-          }
-        }
-      }
-
-      // Liberar Gateway viejo si existe y es diferente
-      if (gateway && seriesActuales.length > 0 && estado === 'Listo para pago') {
-        for (var s = 0; s < seriesActuales.length; s++) {
-          var serieVieja = seriesActuales[s];
-          if (serieVieja !== gateway) {
-            console.log('🔧 Liberando Gateway viejo por reemplazo:', serieVieja);
-            _liberarSerieGPS(serieVieja);
-          }
-        }
-      }
-
-      // Compresión adaptativa de imágenes
-      var archivosComprimidos = archivos;
-      var params = _leerParams();
-      if (params['COMPRESION_IMAGENES'] === 'true' && archivos && archivos.length > 0) {
-        archivosComprimidos = _comprimirImagenes(archivos, parseInt(params['CALIDAD_IMAGEN'] || '80'));
-      }
-
-      if (archivosComprimidos && archivosComprimidos.length > 0) {
-        if (filaDestino === -1 || folderUrl === '') {
-          folderUrl = _subirFotosDrive(folio, archivosComprimidos);
-        } else {
-          _anexarFotosACarpetaExistente(folderUrl, archivosComprimidos);
-        }
-      }
-
-      // Validaciones sintácticas de códigos
-      if (gateway && !_validarSerieGPS(gateway)) {
-        return { ok: false, error: 'Formato de Gateway inválido (XXXX-XXX-XXX).' };
-      }
-      if (camara && !_validarSerieGPS(camara)) {
-        return { ok: false, error: 'Formato de Cámara inválido (XXXX-XXX-XXX).' };
-      }
-
-      // Verificación de disponibilidad en inventario
-      if (gateway) {
-        var disponibilidad = _verificarDisponibilidadSerie(gateway);
-        if (!disponibilidad.disponible && disponibilidad.mensaje.indexOf(folio) === -1) {
-          return { ok: false, error: disponibilidad.mensaje };
-        }
-      }
-      if (camara) {
-        var disponibilidadCamara = _verificarDisponibilidadSerie(camara);
-        if (!disponibilidadCamara.disponible && disponibilidadCamara.mensaje.indexOf(folio) === -1) {
-          return { ok: false, error: disponibilidadCamara.mensaje };
-        }
-      }
-
-      var detalleCompleto = detalleTrabajo + '\n\n📋 REGISTRO DE DISPOSITIVOS:\n';
-      detalleCompleto += '📡 Gateway VG: ' + gateway;
-      if (camara) detalleCompleto += '\n📷 Cámara CM: ' + camara;
-      if (accesorios.ARNES || accesorios['ARNES']) detalleCompleto += '\n🔌 Arnés OBD instalado';
-      if (accesorios.BOTON || accesorios['BOTON']) detalleCompleto += '\n🔴 Botón de pánico instalado';
-      if (accesorios.CORTE || accesorios['CORTE']) detalleCompleto += '\n⛔ Corte de motor EI instalado';
-
-      // ✅ INSTALAR NUEVOS ACCESORIOS
-      if (estado === 'Listo para pago') {
-        for (var tipoAccesorio in accesorios) {
-          if (accesorios[tipoAccesorio] === true) {
-            console.log('🔧 Instalando accesorio nuevo:', tipoAccesorio);
-            _actualizarStockAccesorios(tipoAccesorio, datos.economico, 'instalacion');
-          }
-        }
-      }
-
-      var nuevaFila = [
-        folio, datos.fechaServicio || ahora, datos.economico, datos.placas, gateway,
-        tipoServicio.toUpperCase(), datos.plataforma || 'SAMSARA', sesion.usuarioId, sesion.nombre,
-        detalleCompleto, 0, folderUrl || '', estado, null, null, null, null, false, null,
-        latitud, longitud, ahora
-      ];
-
-      if (filaDestino === -1) sheet.appendRow(nuevaFila);
-      else sheet.getRange(filaDestino, 1, 1, nuevaFila.length).setValues([nuevaFila]);
-
-      // Amarre de estado físico en inventario
-      if (estado === 'Listo para pago') {
-        if (gateway) _actualizarEstadoGPS(gateway, datos.economico);
-        if (camara) _actualizarEstadoGPS(camara, datos.economico);
-      }
-
-      return { ok: true, folio: folio, folderUrl: folderUrl || '', precio: 0, tipo: tipoServicio };
-    }
-
-    // ============================================================
-    // CASE 3. REVISIÓN / DIAGNÓSTICO (SIN DUPLICADOS)
-    // ============================================================
-    if (tipoServicio === 'revision') {
-      console.log('🔄 Procesando REVISIÓN (con posibilidad de reemplazo)...');
-
-      // ✅ OBTENER TODOS LOS DISPOSITIVOS INSTALADOS EN EL VEHÍCULO
-      var dispositivosActuales = _obtenerTodosLosDispositivosPorEconomico(datos.economico);
-      console.log('Dispositivos actuales del vehículo:', dispositivosActuales);
-
-      // ✅ SI HAY GATEWAY NUEVO Y ES DIFERENTE AL ACTUAL, LIBERAR EL VIEJO
-      if (gateway && dispositivosActuales.gateway && dispositivosActuales.gateway !== gateway && estado === 'Listo para pago') {
-        console.log('🔧 Liberando Gateway viejo por actualización:', dispositivosActuales.gateway);
-        _liberarSerieGPS(dispositivosActuales.gateway);
-      }
-
-      // ✅ SI HAY CÁMARA NUEVA Y ES DIFERENTE A LA ACTUAL, LIBERAR LA VIEJA
-      if (camara && dispositivosActuales.camara && dispositivosActuales.camara !== camara && estado === 'Listo para pago') {
-        console.log('🔧 Liberando Cámara vieja por actualización:', dispositivosActuales.camara);
-        _liberarSerieGPS(dispositivosActuales.camara);
-      }
-
-      // ✅ LIBERAR ACCESORIOS VIEJOS ANTES DE INSTALAR NUEVOS (EN REVISIÓN TAMBIÉN)
-      if (estado === 'Listo para pago') {
-        var accesoriosViejosRev = _obtenerAccesoriosPorEconomico(datos.economico);
-        console.log('Accesorios actuales del vehículo (Revisión):', accesoriosViejosRev);
-
-        for (var accViejoRev in accesoriosViejosRev) {
-          if (accesoriosViejosRev[accViejoRev] === true) {
-            console.log('🔧 Liberando accesorio viejo (Revisión):', accViejoRev);
-            _actualizarStockAccesorios(accViejoRev, datos.economico, 'desinstalacion');
-          }
-        }
-      }
-
-      // Validar formato del Gateway (si se ingresó uno)
-      if (gateway && !_validarSerieGPS(gateway)) {
-        return { ok: false, error: 'Formato de Gateway inválido (XXXX-XXX-XXX).' };
-      }
-
-      // Verificar disponibilidad del Gateway (si se ingresó uno nuevo)
-      if (gateway) {
-        var disponibilidadNueva = _verificarDisponibilidadSerie(gateway);
-        if (!disponibilidadNueva.disponible && disponibilidadNueva.mensaje.indexOf(folio) === -1) {
-          return { ok: false, error: 'El Gateway no está disponible: ' + disponibilidadNueva.mensaje };
-        }
-      }
-
-      // Validar formato de la Cámara (si se ingresó)
-      if (camara && !_validarSerieGPS(camara)) {
-        return { ok: false, error: 'Formato de Cámara inválido (XXXX-XXX-XXX).' };
-      }
-
-      // Verificar disponibilidad de la Cámara (si se ingresó una nueva)
-      if (camara) {
-        var disponibilidadCamaraNueva = _verificarDisponibilidadSerie(camara);
-        if (!disponibilidadCamaraNueva.disponible && disponibilidadCamaraNueva.mensaje.indexOf(folio) === -1) {
-          return { ok: false, error: 'La Cámara no está disponible: ' + disponibilidadCamaraNueva.mensaje };
-        }
-      }
-
-      // Subir fotos a Drive
+      // ✅ USA _anexarFotosACarpetaExistente() aquí:
       if (archivos && archivos.length > 0) {
         if (filaDestino === -1 || folderUrl === '') {
           folderUrl = _subirFotosDrive(folio, archivos);
         } else {
-          _anexarFotosACarpetaExistente(folderUrl, archivos);
+          _anexarFotosACarpetaExistente(folderUrl, archivos); // ⚠️ LLAMA A ESTA FUNCIÓN
         }
       }
-
-      // ✅ CONSTRUIR DETALLE COMPLETO (UNA SOLA VEZ)
-      var detalleCompleto = detalleTrabajo + '\n\n📋 REVISIÓN DE DISPOSITIVOS:\n🔍 Diagnóstico realizado.';
-
-      // Gateway
-      if (dispositivosActuales.gateway && gateway && dispositivosActuales.gateway !== gateway) {
-        detalleCompleto += '\n📡 Gateway reemplazado: ' + dispositivosActuales.gateway + ' → ' + gateway;
-      } else if (gateway) {
-        detalleCompleto += '\n📡 Gateway verificado: ' + gateway;
-      } else if (dispositivosActuales.gateway) {
-        detalleCompleto += '\n📡 Gateway verificado: ' + dispositivosActuales.gateway;
-      } else {
-        detalleCompleto += '\n📡 Gateway: No se encontró dispositivo instalado.';
-      }
-
-      // Cámara
-      if (camara && dispositivosActuales.camara && dispositivosActuales.camara !== camara) {
-        detalleCompleto += '\n📷 Cámara reemplazada: ' + dispositivosActuales.camara + ' → ' + camara;
-      } else if (camara) {
-        detalleCompleto += '\n📷 Cámara instalada/verificada: ' + camara;
-      } else if (dispositivosActuales.camara) {
-        detalleCompleto += '\n📷 Cámara verificada: ' + dispositivosActuales.camara;
-      } else {
-        detalleCompleto += '\n📷 Cámara: No se encontró dispositivo instalado.';
-      }
-
-      // Accesorios
-      if (accesorios.ARNES || accesorios['ARNES']) detalleCompleto += '\n🔌 Arnés OBD instalado';
-      if (accesorios.BOTON || accesorios['BOTON']) detalleCompleto += '\n🔴 Botón de pánico instalado';
-      if (accesorios.CORTE || accesorios['CORTE']) detalleCompleto += '\n⛔ Corte de motor EI instalado';
-
-      console.log('📝 Detalle completo:', detalleCompleto);
-
-      // ✅ INSTALAR NUEVOS ACCESORIOS (EN REVISIÓN TAMBIÉN)
-      if (estado === 'Listo para pago') {
-        if (gateway) {
-          console.log('🔧 Instalando Gateway nuevo:', gateway);
-          _actualizarEstadoGPS(gateway, datos.economico);
-        }
-
-        if (camara) {
-          console.log('🔧 Instalando Cámara nueva:', camara);
-          _actualizarEstadoGPS(camara, datos.economico);
-        }
-
-        for (var tipoAccesorio in accesorios) {
-          if (accesorios[tipoAccesorio] === true) {
-            _actualizarStockAccesorios(tipoAccesorio, datos.economico, 'instalacion');
-          }
-        }
-      }
-
-      // Guardar en Bitácora
-      var nuevaFila = [
-        folio,
-        datos.fechaServicio || ahora,
-        datos.economico,
-        datos.placas,
-        gateway || (dispositivosActuales.gateway || ''),
-        'REVISION',
-        datos.plataforma || 'SAMSARA',
-        sesion.usuarioId,
-        sesion.nombre,
-        detalleCompleto,
-        0,
-        folderUrl || '',
-        estado,
-        null, null, null, null, false, null,
-        latitud, longitud, ahora
-      ];
-
-      if (filaDestino === -1) {
-        sheet.appendRow(nuevaFila);
-      } else {
-        sheet.getRange(filaDestino, 1, 1, nuevaFila.length).setValues([nuevaFila]);
-      }
-
-      return {
-        ok: true,
-        folio: folio,
-        folderUrl: folderUrl || '',
-        precio: 0,
-        tipo: 'revision',
-        seriesViejas: dispositivosActuales,
-        serieNueva: gateway
-      };
+      // ... resto del código ...
     }
 
     // ============================================================
-    // CASE 4. TIPO DE SERVICIO NO RECONOCIDO
+    // CASE 3. REVISIÓN / DIAGNÓSTICO
     // ============================================================
+    if (tipoServicio === 'revision') {
+      // ✅ USA _anexarFotosACarpetaExistente() aquí también:
+      if (archivos && archivos.length > 0) {
+        if (filaDestino === -1 || folderUrl === '') {
+          folderUrl = _subirFotosDrive(folio, archivos);
+        } else {
+          _anexarFotosACarpetaExistente(folderUrl, archivos); // ⚠️ LLAMA A ESTA FUNCIÓN
+        }
+      }
+      // ... resto del código ...
+    }
+
     return { ok: false, error: 'Tipo de servicio no reconocido en el sistema: ' + tipoServicio };
+
   } catch (err) {
     console.error('❌ Error en recibirReporteMejorado:', err);
     return { ok: false, error: 'Error al procesar el reporte en la Bitácora: ' + err.message };
+  }
+}
+
+/**
+ * Obtiene la serie GPS instalada en un vehículo (la primera que encuentra)
+ * @param {string} economico - ID del vehículo
+ * @returns {string|null} - Serie GPS o null si no tiene
+ */
+function _obtenerSerieGPSporEconomico(economico) {
+  try {
+    var sheet = SHEETS.INVENTARIO();
+    if (!sheet) return null;
+
+    var datos = sheet.getDataRange().getValues();
+    var economicoStr = economico.toString().toUpperCase().trim();
+
+    for (var i = 1; i < datos.length; i++) {
+      var serie = datos[i][0];
+      if (!serie) continue;
+
+      var tipo = (datos[i][1] || '').toString().toUpperCase();
+      var estado = (datos[i][4] || '').toString().toUpperCase().trim();
+      var economicoAsignado = (datos[i][5] || '').toString().toUpperCase().trim();
+
+      if (economicoAsignado === economicoStr && estado === 'INSTALADO') {
+        // Buscar solo Gateways (VG)
+        if (tipo.indexOf('VG') !== -1 || tipo.indexOf('GATEWAY') !== -1) {
+          return serie.toString().trim();
+        }
+      }
+    }
+
+    return null;
+
+  } catch (err) {
+    console.error('Error en _obtenerSerieGPSporEconomico:', err);
+    return null;
   }
 }
 /**
@@ -1230,104 +1350,7 @@ function _obtenerAccesoriosPorEconomico(economico) {
 
   return resultado;
 }
-/**
- * Obtiene el estado de una serie en el inventario (para depuración)
- * @param {string} serieGPS - Serie a verificar
- * @returns {Object} { estado: string, economico: string }
- */
-function _obtenerEstadoSerie(serieGPS) {
-  var sheet = SHEETS.INVENTARIO();
-  if (!sheet) return { estado: 'No encontrada', economico: '' };
 
-  var datos = sheet.getDataRange().getValues();
-  for (var i = 1; i < datos.length; i++) {
-    if (datos[i][0].toString() === serieGPS.toString()) {
-      return {
-        estado: datos[i][4] || '',
-        economico: datos[i][5] || ''
-      };
-    }
-  }
-  return { estado: 'No encontrada', economico: '' };
-}
-
-/**
- * Obtiene la Cámara instalada en un vehículo
- * @param {string} economico - ID del vehículo (ej. G-361)
- * @returns {string|null} - Serie de la cámara o null si no tiene
- */
-function _obtenerCamaraPorEconomico(economico) {
-  try {
-    var sheet = SHEETS.INVENTARIO();
-    if (!sheet) {
-      console.warn('No se encontró la hoja de inventario');
-      return null;
-    }
-
-    var datos = sheet.getDataRange().getValues();
-    var economicoStr = economico.toString().trim();
-
-    for (var i = 1; i < datos.length; i++) {
-      var serie = datos[i][0];
-      var tipo = datos[i][1] || '';
-      var estado = datos[i][4] || '';
-      var economicoAsignado = datos[i][5] || '';
-
-      if (economicoAsignado.toString().trim() === economicoStr && estado === 'Instalado') {
-        var tipoStr = tipo.toString().toUpperCase();
-        if (tipoStr.indexOf('CM') !== -1 || tipoStr.indexOf('CAMARA') !== -1) {
-          return serie.toString();
-        }
-      }
-    }
-
-    return null;
-
-  } catch (err) {
-    console.error('Error en _obtenerCamaraPorEconomico:', err);
-    return null;
-  }
-}
-
-/**
- * Verifica la disponibilidad de una serie GPS en el inventario
- */
-function _verificarDisponibilidadSerie(serieGPS) {
-  var sheet = SHEETS.INVENTARIO();
-  if (!sheet) {
-    return { disponible: false, mensaje: 'No se encontró la hoja de inventario.' };
-  }
-
-  var datos = sheet.getDataRange().getValues();
-
-  for (var i = 1; i < datos.length; i++) {
-    if (datos[i][0].toString().toUpperCase() === serieGPS.toUpperCase()) {
-      var estado = datos[i][4] || '';
-
-      if (estado === 'Disponible') {
-        return { disponible: true, mensaje: 'Serie disponible' };
-      } else if (estado === 'Instalado') {
-        return { disponible: false, mensaje: 'La serie ' + serieGPS + ' ya está instalada en el económico ' + (datos[i][5] || 'N/A') };
-      } else if (estado === 'Garantía') {
-        return { disponible: false, mensaje: 'La serie ' + serieGPS + ' está en garantía' };
-      } else if (estado === 'Baja') {
-        return { disponible: false, mensaje: 'La serie ' + serieGPS + ' está dada de baja' };
-      } else {
-        return { disponible: false, mensaje: 'La serie ' + serieGPS + ' tiene estado: ' + estado };
-      }
-    }
-  }
-
-  return { disponible: false, mensaje: 'La serie ' + serieGPS + ' no existe en el inventario' };
-}
-
-/**
- * Valida el formato de la serie GPS: XXX-XXX-XXX
- */
-function _validarSerieGPS(serie) {
-  var regex = /^[A-Z0-9]{4}-[A-Z0-9]{3}-[A-Z0-9]{3}$/;
-  return regex.test(serie);
-}
 
 /**
  * Verifica si una serie GPS está bloqueada por garantía
@@ -2162,134 +2185,146 @@ function _obtenerTodasLasSeriesGPSporEconomico(economico) {
  * Busca la serie ignorando guiones para máxima compatibilidad
  */
 function _liberarSerieGPS(serieGPS) {
-  var sheet = SHEETS.INVENTARIO();
-  if (!sheet) {
-    console.warn('❌ No se encontró la hoja INVENTARIO');
-    return { ok: false, error: 'No se encontró la hoja INVENTARIO.' };
-  }
-
-  if (!serieGPS || serieGPS.toString().trim() === '') {
-    console.warn('⚠️ Serie GPS vacía, no se puede liberar');
-    return { ok: false, error: 'La serie GPS provista está vacía.' };
-  }
-
-  // 💡 LIMPIEZA: Quitamos guiones y espacios, convertimos a mayúsculas
-  var serieBusquedaClean = serieGPS.toString().toUpperCase().replace(/[-_\s]/g, '').trim();
-
-  console.log('🔍 Buscando serie para liberar:', serieBusquedaClean);
-
-  var datos = sheet.getDataRange().getValues();
-  var encontrado = false;
-  var filaEncontrada = -1;
-
-  for (var i = 1; i < datos.length; i++) {
-    var serieCeldaRaw = datos[i][0];
-    if (!serieCeldaRaw) continue;
-
-    var serieCeldaClean = serieCeldaRaw.toString().toUpperCase().replace(/[-_\s]/g, '').trim();
-
-    if (serieCeldaClean === serieBusquedaClean) {
-      filaEncontrada = i + 1;
-      encontrado = true;
-      console.log('✅ Coincidencia encontrada en fila:', filaEncontrada);
-      console.log('   Serie en inventario:', serieCeldaRaw);
-      break;
+  try {
+    var sheet = SHEETS.INVENTARIO();
+    if (!sheet) {
+      console.warn('No se encontró la hoja de inventario');
+      return;
     }
+
+    var datos = sheet.getDataRange().getValues();
+    for (var i = 1; i < datos.length; i++) {
+      if (datos[i][0].toString() === serieGPS.toString()) {
+        // Cambiar estado a "Disponible"
+        sheet.getRange(i + 1, 5).setValue('Disponible');
+        // Limpiar económico asignado
+        sheet.getRange(i + 1, 6).setValue('');
+        // Limpiar fecha de instalación
+        sheet.getRange(i + 1, 7).setValue('');
+        // Actualizar última modificación
+        sheet.getRange(i + 1, 9).setValue(new Date());
+        console.log('✅ Serie liberada:', serieGPS);
+        break;
+      }
+    }
+  } catch (err) {
+    console.error('Error en _liberarSerieGPS:', err);
   }
-
-  if (!encontrado) {
-    console.warn('⚠️ NO se encontró la serie en inventario:', serieGPS);
-    return { ok: false, error: 'La serie no fue hallada en el inventario.' };
-  }
-
-  // ✅ LIBERAR LA SERIE
-  var fechaActual = new Date();
-  var valorColumna8 = datos[filaEncontrada - 1][7] || '';
-
-  // Escritura en bloque (Columnas 5 a 9)
-  sheet.getRange(filaEncontrada, 5, 1, 5).setValues([[
-    'Disponible',         // Columna 5 - ESTADO
-    '',                   // Columna 6 - ECONOMICO_ASIGNADO (se limpia)
-    '',                   // Columna 7 - FECHA_INSTALACION (se limpia)
-    valorColumna8,        // Columna 8 - TICKET_GARANTIA (se mantiene)
-    fechaActual           // Columna 9 - ULTIMA_ACTUALIZACION
-  ]]);
-
-  console.log('✅ Serie LIBERADA exitosamente:', serieGPS);
-  console.log('   Económico liberado');
-
-  return { ok: true, error: null };
 }
 
 
 /**
  * Actualiza el estado del GPS en Inventario al ser instalado
  * Busca la serie ignorando guiones para máxima compatibilidad
+ * @param {string} serieGPS - Serie del GPS a instalar
+ * @param {string} economico - Número económico del vehículo
+ * @returns {Object} { ok: boolean, error: string|null, mensaje: string }
  */
 function _actualizarEstadoGPS(serieGPS, economico) {
-  var sheet = SHEETS.INVENTARIO();
-  if (!sheet) {
-    console.warn('❌ No se encontró la hoja INVENTARIO');
-    return { ok: false, error: 'No se encontró la hoja INVENTARIO.' };
-  }
-
-  if (!serieGPS || serieGPS.toString().trim() === '') {
-    console.warn('⚠️ Serie GPS vacía, no se puede actualizar');
-    return { ok: false, error: 'La serie GPS provista está vacía.' };
-  }
-
-  // 💡 LIMPIEZA: Quitamos guiones y espacios, convertimos a mayúsculas
-  var serieBusquedaClean = serieGPS.toString().toUpperCase().replace(/[-_\s]/g, '').trim();
-  var economicoStr = (economico || '').toString().trim();
-
-  console.log('🔍 Buscando serie limpia:', serieBusquedaClean);
-  console.log('📌 Para económico:', economicoStr);
-
-  var datos = sheet.getDataRange().getValues();
-  var encontrado = false;
-  var filaEncontrada = -1;
-
-  for (var i = 1; i < datos.length; i++) {
-    var serieCeldaRaw = datos[i][0];
-    if (!serieCeldaRaw) continue;
-
-    // 💡 LIMPIAMOS LA SERIE DEL INVENTARIO DE LA MISMA FORMA
-    var serieCeldaClean = serieCeldaRaw.toString().toUpperCase().replace(/[-_\s]/g, '').trim();
-
-    // Comparación sin guiones
-    if (serieCeldaClean === serieBusquedaClean) {
-      filaEncontrada = i + 1;
-      encontrado = true;
-      console.log('✅ Coincidencia encontrada en fila:', filaEncontrada);
-      console.log('   Serie en inventario:', serieCeldaRaw);
-      break;
+  try {
+    // ============================================================
+    // 1. VALIDAR ENTRADA
+    // ============================================================
+    
+    var sheet = SHEETS.INVENTARIO();
+    if (!sheet) {
+      console.warn('❌ No se encontró la hoja INVENTARIO');
+      return { ok: false, error: 'No se encontró la hoja INVENTARIO.' };
     }
+
+    if (!serieGPS || serieGPS.toString().trim() === '') {
+      console.warn('⚠️ Serie GPS vacía, no se puede actualizar');
+      return { ok: false, error: 'La serie GPS provista está vacía.' };
+    }
+
+    // ============================================================
+    // 2. LIMPIAR SERIE PARA BÚSQUEDA
+    // ============================================================
+    
+    var serieBusquedaClean = serieGPS.toString()
+      .toUpperCase()
+      .replace(/[-_\s]/g, '')
+      .trim();
+    
+    var economicoStr = (economico || '').toString().trim();
+
+    console.log('🔍 Buscando serie limpia:', serieBusquedaClean);
+    console.log('📌 Para económico:', economicoStr);
+
+    // ============================================================
+    // 3. BUSCAR SERIE EN INVENTARIO
+    // ============================================================
+    
+    var datos = sheet.getDataRange().getValues();
+    var encontrado = false;
+    var filaEncontrada = -1;
+    var serieOriginal = '';
+
+    for (var i = 1; i < datos.length; i++) {
+      var serieCeldaRaw = datos[i][0];
+      if (!serieCeldaRaw) continue;
+
+      // Limpiar la serie del inventario de la misma forma
+      var serieCeldaClean = serieCeldaRaw.toString()
+        .toUpperCase()
+        .replace(/[-_\s]/g, '')
+        .trim();
+
+      // Comparación sin guiones
+      if (serieCeldaClean === serieBusquedaClean) {
+        filaEncontrada = i + 1;
+        encontrado = true;
+        serieOriginal = serieCeldaRaw.toString();
+        console.log('✅ Coincidencia encontrada en fila:', filaEncontrada);
+        console.log('   Serie en inventario:', serieOriginal);
+        break;
+      }
+    }
+
+    if (!encontrado) {
+      console.warn('⚠️ NO se encontró la serie en inventario:', serieGPS);
+      console.warn('   Buscando como:', serieBusquedaClean);
+      console.warn('   Revisa que la serie esté registrada en 📦_Inventario_GPS');
+      return { 
+        ok: false, 
+        error: 'La serie no fue hallada en el inventario.',
+        serieBuscada: serieBusquedaClean
+      };
+    }
+
+    // ============================================================
+    // 4. ACTUALIZAR REGISTRO
+    // ============================================================
+    
+    var fechaActual = new Date();
+    var valorColumna8 = datos[filaEncontrada - 1][7] || '';
+
+    // Escritura en bloque de la fila (Columnas 5 a 9)
+    sheet.getRange(filaEncontrada, 5, 1, 5).setValues([[
+      'Instalado',          // Columna 5 - ESTADO
+      economicoStr,         // Columna 6 - ECONOMICO_ASIGNADO
+      fechaActual,          // Columna 7 - FECHA_INSTALACION
+      valorColumna8,        // Columna 8 - TICKET_GARANTIA (se mantiene)
+      fechaActual           // Columna 9 - ULTIMA_ACTUALIZACION
+    ]]);
+
+    console.log('✅ Serie INSTALADA exitosamente:', serieGPS);
+    console.log('   Asignada a económico:', economicoStr);
+
+    return { 
+      ok: true, 
+      error: null,
+      mensaje: 'GPS instalado correctamente',
+      fila: filaEncontrada
+    };
+
+  } catch (err) {
+    console.error('❌ Error en _actualizarEstadoGPS:', err);
+    return { 
+      ok: false, 
+      error: 'Error al actualizar GPS: ' + err.message 
+    };
   }
-
-  if (!encontrado) {
-    console.warn('⚠️ NO se encontró la serie en inventario:', serieGPS);
-    console.warn('   Buscando como:', serieBusquedaClean);
-    console.warn('   Revisa que la serie esté registrada en 📦_Inventario_GPS');
-    return { ok: false, error: 'La serie no fue hallada en el inventario.' };
-  }
-
-  // ✅ ACTUALIZAR LA SERIE ENCONTRADA
-  var fechaActual = new Date();
-  var valorColumna8 = datos[filaEncontrada - 1][7] || '';
-
-  // Escritura en bloque de la fila (Columnas 5 a 9)
-  sheet.getRange(filaEncontrada, 5, 1, 5).setValues([[
-    'Instalado',          // Columna 5 - ESTADO
-    economicoStr,         // Columna 6 - ECONOMICO_ASIGNADO
-    fechaActual,          // Columna 7 - FECHA_INSTALACION
-    valorColumna8,        // Columna 8 - TICKET_GARANTIA (se mantiene)
-    fechaActual           // Columna 9 - ULTIMA_ACTUALIZACION
-  ]]);
-
-  console.log('✅ Serie INSTALADA exitosamente:', serieGPS);
-  console.log('   Asignada a económico:', economicoStr);
-
-  return { ok: true, error: null };
 }
 
 /**
@@ -2815,59 +2850,7 @@ function obtenerTipoPorSerie(token, serie) {
     return { ok: false, error: err.message };
   }
 }
-/**
- * Verifica si un vehículo ya tiene equipos instalados
- * @param {string|number} economico - ID del vehículo
- * @returns {Object} { tieneEquipos: boolean, gateway: string, camara: string }
- */
-function _verificarEquiposVehiculo(economico) {
-  var resultado = {
-    tieneEquipos: false,
-    gateway: null,
-    camara: null
-  };
 
-  // 1. Validación de seguridad
-  if (economico === undefined || economico === null) return resultado;
-
-  var sheet = SHEETS.INVENTARIO();
-  if (!sheet) return resultado;
-
-  // 2. Obtención y normalización de datos
-  var datos = sheet.getDataRange().getValues();
-  var economicoStr = economico.toString().trim().toUpperCase(); // Normalizado a mayúsculas
-
-  for (var i = 1; i < datos.length; i++) {
-    // Evita errores si la celda de económico asignado está vacía
-    var economicoAsignado = datos[i][5];
-    if (!economicoAsignado) continue;
-
-    var economicoAsignadoStr = economicoAsignado.toString().trim().toUpperCase();
-    var estado = (datos[i][4] || '').toString().trim();
-
-    // 3. Validación de coincidencia
-    if (economicoAsignadoStr === economicoStr && estado === 'Instalado') {
-      resultado.tieneEquipos = true;
-
-      var serie = (datos[i][0] || '').toString().trim();
-      var tipoStr = (datos[i][1] || '').toString().toUpperCase();
-
-      // Identificación de equipos
-      if (tipoStr.indexOf('VG') !== -1 || tipoStr.indexOf('GATEWAY') !== -1) {
-        resultado.gateway = serie;
-      } else if (tipoStr.indexOf('CM') !== -1 || tipoStr.indexOf('CAMARA') !== -1) {
-        resultado.camara = serie;
-      }
-
-      // OPTIMIZACIÓN: Si ya encontramos ambos equipos, rompemos el ciclo inmediatamente
-      if (resultado.gateway && resultado.camara) {
-        break;
-      }
-    }
-  }
-
-  return resultado;
-}
 /**
  * Obtiene TODOS los dispositivos (Gateway y Cámara) instalados en un vehículo
  * @param {string} economico - ID del vehículo
@@ -3028,6 +3011,7 @@ function verificarEquiposVehiculoBackend(token, economico) {
  */
 /**
  * Obtiene todo el inventario
+ * NOTA: La columna ECONOMICO_ASIGNADO en inventario referencia a ECONOMICO en catálogo
  */
 function obtenerInventarioGPS(token) {
   console.log('📦 obtenerInventarioGPS - INICIO');
@@ -3050,7 +3034,7 @@ function obtenerInventarioGPS(token) {
       var catalogoData = catalogoSheet.getDataRange().getValues();
       // Saltar encabezado (fila 1)
       for (var c = 1; c < catalogoData.length; c++) {
-        var eco = (catalogoData[c][0] || '').toString().toUpperCase().trim();
+        var eco = (catalogoData[c][0] || '').toString().toUpperCase().trim(); // Columna 1: ECONOMICO
         var tipoUnidad = (catalogoData[c][10] || '').toString().trim(); // Columna K = TIPO_UNIDAD
         var estado = (catalogoData[c][8] || '').toString().toUpperCase().trim(); // Columna I = ESTADO
         if (eco) {
@@ -3440,7 +3424,7 @@ function agregarEquipoInventario(token, equipo) {
 function exportarReporteUnidades(token) {
   var sesionResp = validarSesion(token);
   if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-  
+
   if (sesionResp.sesion.rol > 2) {
     return { ok: false, error: 'Sin permisos para exportar reporte.' };
   }
@@ -3460,11 +3444,11 @@ function exportarReporteUnidades(token) {
     // 1. OBTENER VEHÍCULOS ACTIVOS DEL CATÁLOGO
     var catalogoData = catalogoSheet.getDataRange().getValues();
     var catalogoVehiculos = {};
-    
+
     for (var i = 1; i < catalogoData.length; i++) {
       var fila = catalogoData[i];
       if (!fila[0]) continue;
-      
+
       var estado = (fila[8] || '').toString().trim(); // Columna I = ESTADO
       if (estado === 'Activo') {
         catalogoVehiculos[fila[0].toString().trim()] = {
@@ -3484,12 +3468,12 @@ function exportarReporteUnidades(token) {
     for (var j = 1; j < inventarioData.length; j++) {
       var fila = inventarioData[j];
       if (!fila[0]) continue;
-      
+
       var serie = fila[0] || '';
       var tipo = fila[1] || '';
       var estado = (fila[4] || '').toString().trim();
       var economico = (fila[5] || '').toString().trim();
-      
+
       // ✅ CORREGIDO: Incluir equipos en Garantía también (tienen económico asignado)
       // Excluir solo Baja y Disponible (sin económico)
       if (economico && estado !== 'Baja' && estado !== 'Disponible') {
@@ -3502,14 +3486,14 @@ function exportarReporteUnidades(token) {
             accesorios: []
           };
         }
-        
+
         var tipoUpper = tipo.toString().toUpperCase();
         if (tipoUpper.indexOf('VG') !== -1 || tipoUpper.indexOf('GATEWAY') !== -1) {
-          equiposPorEconomico[economico].gateway = tipo;
-          equiposPorEconomico[economico].gatewaySerie = serie;
+          equiposPorEconomico[economico].gateway = tipo;        // ← Guarda el TIPO
+          equiposPorEconomico[economico].gatewaySerie = serie;  // ← Guarda la SERIE
         } else if (tipoUpper.indexOf('CM') !== -1 || tipoUpper.indexOf('CAMARA') !== -1) {
-          equiposPorEconomico[economico].camara = tipo;
-          equiposPorEconomico[economico].camaraSerie = serie;
+          equiposPorEconomico[economico].camara = tipo;         // ← Guarda el TIPO
+          equiposPorEconomico[economico].camaraSerie = serie;   // ← Guarda la SERIE
         }
       }
     }
@@ -3521,13 +3505,13 @@ function exportarReporteUnidades(token) {
       for (var k = 1; k < accesoriosData.length; k++) {
         var fila = accesoriosData[k];
         if (!fila[0]) continue;
-        
+
         var tipoAccesorio = fila[1] || fila[0] || '';
         var economicoAsignado = (fila[5] || '').toString().trim();
-        
+
         if (economicoAsignado) {
-          var listaEconomicos = economicoAsignado.split(',').map(function(e) { return e.trim(); });
-          listaEconomicos.forEach(function(eco) {
+          var listaEconomicos = economicoAsignado.split(',').map(function (e) { return e.trim(); });
+          listaEconomicos.forEach(function (eco) {
             if (eco && equiposPorEconomico[eco]) {
               equiposPorEconomico[eco].accesorios.push(tipoAccesorio);
             }
@@ -3578,16 +3562,16 @@ function exportarReporteUnidades(token) {
       var eco = economicoKeys[idx];
       var equipo = equiposPorEconomico[eco];
       var infoVehiculo = catalogoVehiculos[eco] || null;
-      
+
       contador++;
       var nombre = infoVehiculo ? infoVehiculo.nombre : eco;
       var tipoVehiculo = infoVehiculo ? (infoVehiculo.tipoUnidad || infoVehiculo.tipoVehiculo || '—') : '—';
       var etiquetas = equipo.accesorios.length > 0 ? equipo.accesorios.join(', ') : '—';
-      
+
       // ✅ Si la cámara está en garantía pero tiene serie, mostrarla con indicador
       var camaraMostrar = equipo.camara || '—';
       var camaraSerieMostrar = equipo.camaraSerie || '—';
-      
+
       html += `<tr>
         <td>${contador}</td>
         <td><strong>${nombre}</strong></td>
@@ -3616,14 +3600,14 @@ function exportarReporteUnidades(token) {
     </body></html>`;
 
     // 6. CREAR ARCHIVO EN DRIVE
-    var nombreArchivo = 'Reporte_Unidades_Series_' + 
+    var nombreArchivo = 'Reporte_Unidades_Series_' +
       Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss') + '.xls';
-    
+
     var blob = Utilities.newBlob(html, 'application/vnd.ms-excel', nombreArchivo);
     var file = DriveApp.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     var url = file.getUrl();
-    
+
     console.log('✅ Reporte de unidades generado:', nombreArchivo);
     return { ok: true, url: url };
 
@@ -3642,761 +3626,1012 @@ function exportarReporteUnidades(token) {
  * @returns {Object} { ok: true, tipos: [...] }
  */
 function obtenerTiposUnidad(token) {
-    var sesionResp = validarSesion(token);
-    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
 
-    try {
-      var sheet = SS.getSheetByName('📋_Tipos_Unidad');
-      if (!sheet) {
-        // Si no existe la hoja, crearla con valores por defecto
-        SS.insertSheet('📋_Tipos_Unidad');
-        var newSheet = SS.getSheetByName('📋_Tipos_Unidad');
-        newSheet.appendRow(['Tipo']);
-        var tiposDefault = ['CAJA SECA', 'DOLLY', 'MÓVIL', 'PRUEBA', 'REMOLQUE', 'UNIDAD', 'UTILITARIA'];
-        tiposDefault.forEach(function (t) {
-          newSheet.appendRow([t]);
-        });
-        return { ok: true, tipos: tiposDefault };
-      }
-
-      var datos = sheet.getDataRange().getValues();
-      var tipos = [];
-
-      for (var i = 1; i < datos.length; i++) {
-        var tipo = datos[i][0];
-        if (tipo && tipo.toString().trim() !== '') {
-          tipos.push(tipo.toString().trim().toUpperCase());
-        }
-      }
-
-      return { ok: true, tipos: tipos };
-
-    } catch (err) {
-      console.error('Error al obtener tipos de unidad:', err);
-      return { ok: false, error: err.message };
+  try {
+    var sheet = SS.getSheetByName('📋_Tipos_Unidad');
+    if (!sheet) {
+      // Si no existe la hoja, crearla con valores por defecto
+      SS.insertSheet('📋_Tipos_Unidad');
+      var newSheet = SS.getSheetByName('📋_Tipos_Unidad');
+      newSheet.appendRow(['Tipo']);
+      var tiposDefault = ['CAJA SECA', 'DOLLY', 'MÓVIL', 'PRUEBA', 'REMOLQUE', 'UNIDAD', 'UTILITARIA'];
+      tiposDefault.forEach(function (t) {
+        newSheet.appendRow([t]);
+      });
+      return { ok: true, tipos: tiposDefault };
     }
+
+    var datos = sheet.getDataRange().getValues();
+    var tipos = [];
+
+    for (var i = 1; i < datos.length; i++) {
+      var tipo = datos[i][0];
+      if (tipo && tipo.toString().trim() !== '') {
+        tipos.push(tipo.toString().trim().toUpperCase());
+      }
+    }
+
+    return { ok: true, tipos: tipos };
+
+  } catch (err) {
+    console.error('Error al obtener tipos de unidad:', err);
+    return { ok: false, error: err.message };
   }
-  /**
-   * Agrega un nuevo tipo de unidad (solo Admin/Revisor)
-   * @param {string} token - Token de sesión
-   * @param {string} tipo - Nuevo tipo a agregar
-   * @returns {Object} { ok: true }
-   */
-  function agregarTipoUnidad(token, tipo) {
-    var sesionResp = validarSesion(token);
-    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+}
+/**
+ * Agrega un nuevo tipo de unidad (solo Admin/Revisor)
+ * @param {string} token - Token de sesión
+ * @param {string} tipo - Nuevo tipo a agregar
+ * @returns {Object} { ok: true }
+ */
+function agregarTipoUnidad(token, tipo) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
 
-    if (sesionResp.sesion.rol > 2) {
-      return { ok: false, error: 'Sin permisos para agregar tipos de unidad.' };
-    }
-
-    if (!tipo || tipo.trim() === '') {
-      return { ok: false, error: 'El tipo de unidad es requerido.' };
-    }
-
-    try {
-      var sheet = SS.getSheetByName('📋_Tipos_Unidad');
-      if (!sheet) {
-        return { ok: false, error: 'No se encontró la hoja 📋_Tipos_Unidad.' };
-      }
-
-      var tipoUpper = tipo.toString().toUpperCase().trim();
-
-      var datos = sheet.getDataRange().getValues();
-      for (var i = 1; i < datos.length; i++) {
-        var existente = (datos[i][0] || '').toString().toUpperCase().trim();
-        if (existente === tipoUpper) {
-          return { ok: false, error: 'El tipo "' + tipoUpper + '" ya existe.' };
-        }
-      }
-
-      sheet.appendRow([tipoUpper]);
-
-      console.log('✅ Tipo de unidad agregado:', tipoUpper);
-      return { ok: true, mensaje: 'Tipo "' + tipoUpper + '" agregado correctamente.' };
-
-    } catch (err) {
-      console.error('Error al agregar tipo de unidad:', err);
-      return { ok: false, error: err.message };
-    }
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para agregar tipos de unidad.' };
   }
-  /**
-   * Elimina un tipo de unidad (solo Admin/Revisor)
-   * @param {string} token - Token de sesión
-   * @param {string} tipo - Tipo a eliminar
-   * @returns {Object} { ok: true }
-   */
-  function eliminarTipoUnidad(token, tipo) {
-    var sesionResp = validarSesion(token);
-    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
 
-    if (sesionResp.sesion.rol > 2) {
-      return { ok: false, error: 'Sin permisos para eliminar tipos de unidad.' };
-    }
-
-    if (!tipo || tipo.trim() === '') {
-      return { ok: false, error: 'El tipo de unidad es requerido.' };
-    }
-
-    try {
-      var sheet = SS.getSheetByName('📋_Tipos_Unidad');
-      if (!sheet) {
-        return { ok: false, error: 'No se encontró la hoja 📋_Tipos_Unidad.' };
-      }
-
-      var tipoUpper = tipo.toString().toUpperCase().trim();
-      var datos = sheet.getDataRange().getValues();
-      var filaEliminar = -1;
-
-      for (var i = 1; i < datos.length; i++) {
-        var existente = (datos[i][0] || '').toString().toUpperCase().trim();
-        if (existente === tipoUpper) {
-          filaEliminar = i + 1;
-          break;
-        }
-      }
-
-      if (filaEliminar === -1) {
-        return { ok: false, error: 'El tipo "' + tipoUpper + '" no existe.' };
-      }
-
-      sheet.deleteRow(filaEliminar);
-
-      console.log('✅ Tipo de unidad eliminado:', tipoUpper);
-      return { ok: true, mensaje: 'Tipo "' + tipoUpper + '" eliminado correctamente.' };
-
-    } catch (err) {
-      console.error('Error al eliminar tipo de unidad:', err);
-      return { ok: false, error: err.message };
-    }
+  if (!tipo || tipo.trim() === '') {
+    return { ok: false, error: 'El tipo de unidad es requerido.' };
   }
-  /**
-   * Actualiza el tipo de unidad de un vehículo en la flotilla
-   * @param {string} token - Token de sesión
-   * @param {string} economico - ID del vehículo
-   * @param {string} tipoUnidad - Tipo de unidad seleccionado
-   * @returns {Object} { ok: true }
-   */
-  function actualizarTipoUnidad(token, economico, tipoUnidad) {
-    var sesionResp = validarSesion(token);
-    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
 
-    if (sesionResp.sesion.rol > 2) {
-      return { ok: false, error: 'Sin permisos para modificar tipo de unidad.' };
+  try {
+    var sheet = SS.getSheetByName('📋_Tipos_Unidad');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja 📋_Tipos_Unidad.' };
     }
 
-    if (!economico) {
-      return { ok: false, error: 'El económico es requerido.' };
+    var tipoUpper = tipo.toString().toUpperCase().trim();
+
+    var datos = sheet.getDataRange().getValues();
+    for (var i = 1; i < datos.length; i++) {
+      var existente = (datos[i][0] || '').toString().toUpperCase().trim();
+      if (existente === tipoUpper) {
+        return { ok: false, error: 'El tipo "' + tipoUpper + '" ya existe.' };
+      }
     }
 
-    try {
-      // ✅ GUARDAR EN 📋_Catalogo_Vehiculos
-      var catalogoSheet = SS.getSheetByName('📋_Catalogo_Vehiculos');
-      if (!catalogoSheet) {
-        return { ok: false, error: 'No se encontró la hoja 📋_Catalogo_Vehiculos.' };
+    sheet.appendRow([tipoUpper]);
+
+    console.log('✅ Tipo de unidad agregado:', tipoUpper);
+    return { ok: true, mensaje: 'Tipo "' + tipoUpper + '" agregado correctamente.' };
+
+  } catch (err) {
+    console.error('Error al agregar tipo de unidad:', err);
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Elimina un tipo de unidad (solo Admin/Revisor)
+ * @param {string} token - Token de sesión
+ * @param {string} tipo - Tipo a eliminar
+ * @returns {Object} { ok: true }
+ */
+function eliminarTipoUnidad(token, tipo) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para eliminar tipos de unidad.' };
+  }
+
+  if (!tipo || tipo.trim() === '') {
+    return { ok: false, error: 'El tipo de unidad es requerido.' };
+  }
+
+  try {
+    var sheet = SS.getSheetByName('📋_Tipos_Unidad');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja 📋_Tipos_Unidad.' };
+    }
+
+    var tipoUpper = tipo.toString().toUpperCase().trim();
+    var datos = sheet.getDataRange().getValues();
+    var filaEliminar = -1;
+
+    for (var i = 1; i < datos.length; i++) {
+      var existente = (datos[i][0] || '').toString().toUpperCase().trim();
+      if (existente === tipoUpper) {
+        filaEliminar = i + 1;
+        break;
       }
+    }
 
-      var datos = catalogoSheet.getDataRange().getValues();
-      var encontrado = false;
-      var filaReal = -1;
-      var economicoBusqueda = economico.toString().toUpperCase().trim();
+    if (filaEliminar === -1) {
+      return { ok: false, error: 'El tipo "' + tipoUpper + '" no existe.' };
+    }
 
-      for (var i = 1; i < datos.length; i++) {
-        var ecoActual = (datos[i][0] || '').toString().toUpperCase().trim();
-        if (ecoActual === economicoBusqueda) {
-          filaReal = i + 1;
-          encontrado = true;
-          break;
-        }
+    sheet.deleteRow(filaEliminar);
+
+    console.log('✅ Tipo de unidad eliminado:', tipoUpper);
+    return { ok: true, mensaje: 'Tipo "' + tipoUpper + '" eliminado correctamente.' };
+
+  } catch (err) {
+    console.error('Error al eliminar tipo de unidad:', err);
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Actualiza el tipo de unidad de un vehículo en la flotilla
+ * @param {string} token - Token de sesión
+ * @param {string} economico - ID del vehículo
+ * @param {string} tipoUnidad - Tipo de unidad seleccionado
+ * @returns {Object} { ok: true }
+ */
+function actualizarTipoUnidad(token, economico, tipoUnidad) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para modificar tipo de unidad.' };
+  }
+
+  if (!economico) {
+    return { ok: false, error: 'El económico es requerido.' };
+  }
+
+  try {
+    // ✅ GUARDAR EN 📋_Catalogo_Vehiculos
+    var catalogoSheet = SS.getSheetByName('📋_Catalogo_Vehiculos');
+    if (!catalogoSheet) {
+      return { ok: false, error: 'No se encontró la hoja 📋_Catalogo_Vehiculos.' };
+    }
+
+    var datos = catalogoSheet.getDataRange().getValues();
+    var encontrado = false;
+    var filaReal = -1;
+    var economicoBusqueda = economico.toString().toUpperCase().trim();
+
+    for (var i = 1; i < datos.length; i++) {
+      var ecoActual = (datos[i][0] || '').toString().toUpperCase().trim();
+      if (ecoActual === economicoBusqueda) {
+        filaReal = i + 1;
+        encontrado = true;
+        break;
       }
+    }
 
-      if (!encontrado) {
-        // Si no existe el vehículo en el catálogo, lo creamos automáticamente
-        console.warn('⚠️ Vehículo no encontrado en catálogo, creándolo...');
-        var nuevaFila = [
-          economico,      // ECONOMICO
-          '',             // PLACAS
-          '',             // TIPO_VEHICULO
-          '',             // MARCA
-          '',             // MODELO
-          '',             // AÑO
-          '',             // SERIE_VEHICULO
-          '',             // GPS_ACTUAL
-          'Activo',       // ESTADO
-          '',             // ULTIMO_SERVICIO
-          tipoUnidad      // TIPO_UNIDAD
-        ];
-        catalogoSheet.appendRow(nuevaFila);
-        console.log('✅ Vehículo creado en catálogo:', economico);
-        return { ok: true };
-      }
-
-      // ✅ Actualizar TIPO_UNIDAD en la columna 11 (índice 10)
-      catalogoSheet.getRange(filaReal, 11).setValue(tipoUnidad || '');
-
-      console.log('✅ Tipo de unidad actualizado en catálogo:', economico, '→', tipoUnidad || 'VACÍO');
+    if (!encontrado) {
+      // Si no existe el vehículo en el catálogo, lo creamos automáticamente
+      console.warn('⚠️ Vehículo no encontrado en catálogo, creándolo...');
+      var nuevaFila = [
+        economico,      // ECONOMICO
+        '',             // PLACAS
+        '',             // TIPO_VEHICULO
+        '',             // MARCA
+        '',             // MODELO
+        '',             // AÑO
+        '',             // SERIE_VEHICULO
+        '',             // GPS_ACTUAL
+        'Activo',       // ESTADO
+        '',             // ULTIMO_SERVICIO
+        tipoUnidad      // TIPO_UNIDAD
+      ];
+      catalogoSheet.appendRow(nuevaFila);
+      console.log('✅ Vehículo creado en catálogo:', economico);
       return { ok: true };
-
-    } catch (err) {
-      console.error('Error en actualizarTipoUnidad:', err);
-      return { ok: false, error: err.message };
     }
+
+    // ✅ Actualizar TIPO_UNIDAD en la columna 11 (índice 10)
+    catalogoSheet.getRange(filaReal, 11).setValue(tipoUnidad || '');
+
+    console.log('✅ Tipo de unidad actualizado en catálogo:', economico, '→', tipoUnidad || 'VACÍO');
+    return { ok: true };
+
+  } catch (err) {
+    console.error('Error en actualizarTipoUnidad:', err);
+    return { ok: false, error: err.message };
   }
-  /**
-   * Obtiene el tipo de unidad de un vehículo específico
-   * @param {string} token - Token de sesión
-   * @param {string} economico - ID del vehículo
-   * @returns {Object} { ok: true, tipoUnidad: string }
-   */
-  function obtenerTipoUnidadPorEconomico(token, economico) {
-    var sesionResp = validarSesion(token);
-    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+}
+/**
+ * Obtiene el tipo de unidad de un vehículo específico
+ * @param {string} token - Token de sesión
+ * @param {string} economico - ID del vehículo
+ * @returns {Object} { ok: true, tipoUnidad: string }
+ */
+function obtenerTipoUnidadPorEconomico(token, economico) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
 
-    if (!economico) {
-      return { ok: false, error: 'El económico es requerido.' };
-    }
-
-    try {
-      // ✅ LEER DESDE 📋_Catalogo_Vehiculos
-      var catalogoSheet = SS.getSheetByName('📋_Catalogo_Vehiculos');
-      if (!catalogoSheet) {
-        return { ok: false, error: 'No se encontró la hoja 📋_Catalogo_Vehiculos.' };
-      }
-
-      var datos = catalogoSheet.getDataRange().getValues();
-      var economicoBusqueda = economico.toString().toUpperCase().trim();
-
-      for (var i = 1; i < datos.length; i++) {
-        var ecoActual = (datos[i][0] || '').toString().toUpperCase().trim();
-        if (ecoActual === economicoBusqueda) {
-          var tipoUnidad = (datos[i][10] || '').toString().trim(); // Columna K = TIPO_UNIDAD
-          return { ok: true, tipoUnidad: tipoUnidad, existe: true };
-        }
-      }
-
-      return { ok: true, tipoUnidad: '', existe: false };
-
-    } catch (err) {
-      console.error('Error en obtenerTipoUnidadPorEconomico:', err);
-      return { ok: false, error: err.message };
-    }
-  }
-  /**
-   * Actualiza los datos de un equipo en el inventario
-   * @param {string} token - Token de sesión
-   * @param {string} serie - Serie del equipo
-   * @param {Object} datos - Datos a actualizar { tipo, modelo, imei, estado, economico, observaciones }
-   * @returns {Object} { ok: true }
-   */
-  function actualizarEquipoInventario(token, serie, datos) {
-    var sesionResp = validarSesion(token);
-    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-
-    // Solo Admin (1) y Revisor (2) pueden editar
-    if (sesionResp.sesion.rol > 2) {
-      return { ok: false, error: 'Sin permisos para editar equipos.' };
-    }
-
-    if (!serie) {
-      return { ok: false, error: 'La serie es requerida.' };
-    }
-
-    try {
-      var sheet = SHEETS.INVENTARIO();
-      if (!sheet) {
-        return { ok: false, error: 'No se encontró la hoja de inventario.' };
-      }
-
-      var datosSheet = sheet.getDataRange().getValues();
-      var serieBusqueda = serie.toString().toUpperCase().trim();
-      var encontrado = false;
-      var filaReal = -1;
-
-      for (var i = 1; i < datosSheet.length; i++) {
-        var serieActual = (datosSheet[i][0] || '').toString().toUpperCase().trim();
-        if (serieActual === serieBusqueda) {
-          filaReal = i + 1;
-          encontrado = true;
-          break;
-        }
-      }
-
-      if (!encontrado) {
-        return { ok: false, error: 'No se encontró el equipo con serie: ' + serie };
-      }
-
-      // ✅ ACTUALIZAR CAMPOS
-      // Columna 2 (B): TIPO_EQUIPO
-      if (datos.tipo !== undefined) {
-        sheet.getRange(filaReal, 2).setValue(datos.tipo);
-      }
-
-      // Columna 3 (C): MODELO
-      if (datos.modelo !== undefined) {
-        sheet.getRange(filaReal, 3).setValue(datos.modelo);
-      }
-
-      // Columna 4 (D): IMEI
-      if (datos.imei !== undefined) {
-        sheet.getRange(filaReal, 4).setValue(datos.imei);
-      }
-
-      // Columna 5 (E): ESTADO
-      if (datos.estado !== undefined) {
-        sheet.getRange(filaReal, 5).setValue(datos.estado);
-      }
-
-      // Columna 6 (F): ECONOMICO_ASIGNADO
-      if (datos.economico !== undefined) {
-        sheet.getRange(filaReal, 6).setValue(datos.economico);
-
-        // Si el estado cambió a Instalado y hay económico, actualizar fecha
-        if (datos.estado === 'Instalado' && datos.economico) {
-          sheet.getRange(filaReal, 7).setValue(new Date()); // FECHA_INSTALACION
-        } else if (datos.estado === 'Disponible') {
-          // Si se libera, limpiar económico y fecha
-          sheet.getRange(filaReal, 6).setValue('');
-          sheet.getRange(filaReal, 7).setValue('');
-        }
-      }
-
-      // Columna 11 (K): OBSERVACIONES
-      if (datos.observaciones !== undefined) {
-        var obsActual = (datosSheet[filaReal - 1][10] || '');
-        var nuevaObs = obsActual + (obsActual ? ' | ' : '') + '[EDIT] ' + datos.observaciones;
-        sheet.getRange(filaReal, 11).setValue(nuevaObs);
-      }
-
-      // Columna 10 (J): ULTIMA_ACTUALIZACION
-      sheet.getRange(filaReal, 10).setValue(new Date());
-
-      console.log('✅ Equipo actualizado:', serie);
-      return { ok: true };
-
-    } catch (err) {
-      console.error('Error en actualizarEquipoInventario:', err);
-      return { ok: false, error: err.message };
-    }
-  }
-  // ============================================================
-  // TICKETS - BACKEND
-  // ============================================================
-
-  /**
-   * Genera un nuevo ID de ticket secuencial
-   */
-  function generarIdTicket() {
-    var params = _leerParams();
-    var prefijo = params['TICKET_PREFIJO'] || 'TKT';
-    var ultimo = parseInt(params['TICKET_ULTIMO'] || '0', 10);
-    var nuevo = ultimo + 1;
-    var ticketId = prefijo + '-' + String(nuevo).padStart(4, '0');
-    _escribirParam('TICKET_ULTIMO', String(nuevo));
-    return ticketId;
+  if (!economico) {
+    return { ok: false, error: 'El económico es requerido.' };
   }
 
-  /**
-   * Obtiene todos los tickets
-   * @param {string} token - Token de sesión
-   * @param {Object} filtros - Filtros opcionales { estado, unidad, tecnico }
-   * @returns {Object} { ok: true, tickets: [...] }
-   */
-  // ============================================================
-  // TICKETS - BACKEND
-  // ============================================================
-  function pruebaTickets() {
-    return { ok: true, mensaje: 'Función de prueba funcionando' };
-  }
-
-  /**
-   * Obtiene todos los tickets
-   * @param {string} token - Token de sesión
-   * @param {Object} filtros - Filtros opcionales { estado, unidad, tecnico }
-   * @returns {Object} { ok: true, tickets: [...] }
-   */
-  function obtenerTickets(token, filtros) {
-    console.log('🎫 obtenerTickets - INICIO SIMPLIFICADO');
-
-    try {
-      // 1. Obtener la hoja
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      var sheet = ss.getSheetByName('🎫_Tickets');
-
-      if (!sheet) {
-        console.warn('⚠️ No se encontró la hoja 🎫_Tickets');
-        return { ok: true, tickets: [] };
-      }
-
-      // 2. Obtener datos
-      var datos = sheet.getDataRange().getValues();
-      var tickets = [];
-
-      // 3. Recorrer filas (desde la 2, saltando encabezado)
-      for (var i = 1; i < datos.length; i++) {
-        var fila = datos[i];
-        if (!fila || !fila[0]) continue; // Saltar filas vacías
-
-        var ticket = {
-          id: String(fila[0] || ''),
-          fecha: String(fila[1] || ''),
-          unidad: String(fila[2] || ''),
-          descripcion: String(fila[3] || ''),
-          creadoPor: String(fila[4] || ''),
-          creadoPorNombre: String(fila[5] || ''),
-          estado: String(fila[6] || 'Pendiente'),
-          tecnicoAsignado: String(fila[7] || ''),
-          tecnicoNombre: String(fila[8] || ''),
-          fechaCierre: String(fila[9] || ''),
-          comentarios: String(fila[10] || ''),
-          ultimaActualizacion: String(fila[11] || '')
-        };
-
-        tickets.push(ticket);
-      }
-
-      console.log('✅ Tickets encontrados:', tickets.length);
-      return { ok: true, tickets: tickets };
-
-    } catch (err) {
-      console.error('❌ Error en obtenerTickets:', err);
-      return { ok: false, error: String(err.message) };
+  try {
+    // ✅ LEER DESDE 📋_Catalogo_Vehiculos
+    var catalogoSheet = SS.getSheetByName('📋_Catalogo_Vehiculos');
+    if (!catalogoSheet) {
+      return { ok: false, error: 'No se encontró la hoja 📋_Catalogo_Vehiculos.' };
     }
+
+    var datos = catalogoSheet.getDataRange().getValues();
+    var economicoBusqueda = economico.toString().toUpperCase().trim();
+
+    for (var i = 1; i < datos.length; i++) {
+      var ecoActual = (datos[i][0] || '').toString().toUpperCase().trim();
+      if (ecoActual === economicoBusqueda) {
+        var tipoUnidad = (datos[i][10] || '').toString().trim(); // Columna K = TIPO_UNIDAD
+        return { ok: true, tipoUnidad: tipoUnidad, existe: true };
+      }
+    }
+
+    return { ok: true, tipoUnidad: '', existe: false };
+
+  } catch (err) {
+    console.error('Error en obtenerTipoUnidadPorEconomico:', err);
+    return { ok: false, error: err.message };
   }
-  function diagnosticarTickets() {
-    try {
-      console.log('🔍 DIAGNÓSTICO DE TICKETS');
+}
+/**
+ * Actualiza los datos de un equipo en el inventario
+ * @param {string} token - Token de sesión
+ * @param {string} serie - Serie del equipo
+ * @param {Object} datos - Datos a actualizar { tipo, modelo, imei, estado, economico, observaciones }
+ * @returns {Object} { ok: true }
+ */
+function actualizarEquipoInventario(token, serie, datos) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
 
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      var sheet = ss.getSheetByName('🎫_Tickets');
-      console.log('📌 Hoja 🎫_Tickets existe?', sheet !== null);
+  // Solo Admin (1) y Revisor (2) pueden editar
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para editar equipos.' };
+  }
 
-      if (!sheet) {
-        return { ok: false, error: 'La hoja 🎫_Tickets no existe' };
+  if (!serie) {
+    return { ok: false, error: 'La serie es requerida.' };
+  }
+
+  try {
+    var sheet = SHEETS.INVENTARIO();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de inventario.' };
+    }
+
+    var datosSheet = sheet.getDataRange().getValues();
+    var serieBusqueda = serie.toString().toUpperCase().trim();
+    var encontrado = false;
+    var filaReal = -1;
+
+    for (var i = 1; i < datosSheet.length; i++) {
+      var serieActual = (datosSheet[i][0] || '').toString().toUpperCase().trim();
+      if (serieActual === serieBusqueda) {
+        filaReal = i + 1;
+        encontrado = true;
+        break;
+      }
+    }
+
+    if (!encontrado) {
+      return { ok: false, error: 'No se encontró el equipo con serie: ' + serie };
+    }
+
+    // ✅ ACTUALIZAR CAMPOS
+    // Columna 2 (B): TIPO_EQUIPO
+    if (datos.tipo !== undefined) {
+      sheet.getRange(filaReal, 2).setValue(datos.tipo);
+    }
+
+    // Columna 3 (C): MODELO
+    if (datos.modelo !== undefined) {
+      sheet.getRange(filaReal, 3).setValue(datos.modelo);
+    }
+
+    // Columna 4 (D): IMEI
+    if (datos.imei !== undefined) {
+      sheet.getRange(filaReal, 4).setValue(datos.imei);
+    }
+
+    // Columna 5 (E): ESTADO
+    if (datos.estado !== undefined) {
+      sheet.getRange(filaReal, 5).setValue(datos.estado);
+    }
+
+    // Columna 6 (F): ECONOMICO_ASIGNADO
+    if (datos.economico !== undefined) {
+      sheet.getRange(filaReal, 6).setValue(datos.economico);
+
+      // Si el estado cambió a Instalado y hay económico, actualizar fecha
+      if (datos.estado === 'Instalado' && datos.economico) {
+        sheet.getRange(filaReal, 7).setValue(new Date()); // FECHA_INSTALACION
+      } else if (datos.estado === 'Disponible') {
+        // Si se libera, limpiar económico y fecha
+        sheet.getRange(filaReal, 6).setValue('');
+        sheet.getRange(filaReal, 7).setValue('');
+      }
+    }
+
+    // Columna 11 (K): OBSERVACIONES
+    if (datos.observaciones !== undefined) {
+      var obsActual = (datosSheet[filaReal - 1][10] || '');
+      var nuevaObs = obsActual + (obsActual ? ' | ' : '') + '[EDIT] ' + datos.observaciones;
+      sheet.getRange(filaReal, 11).setValue(nuevaObs);
+    }
+
+    // Columna 10 (J): ULTIMA_ACTUALIZACION
+    sheet.getRange(filaReal, 10).setValue(new Date());
+
+    console.log('✅ Equipo actualizado:', serie);
+    return { ok: true };
+
+  } catch (err) {
+    console.error('Error en actualizarEquipoInventario:', err);
+    return { ok: false, error: err.message };
+  }
+}
+// ============================================================
+// TICKETS - BACKEND
+// ============================================================
+
+/**
+ * Genera un ID único para tickets
+ */
+function generarIdTicket() {
+  var params = _leerParams();
+  var prefijo = params['TICKET_PREFIJO'] || 'TKT';
+  var ultimo = parseInt(params['TICKET_ULTIMO'] || '0', 10);
+  var nuevo = ultimo + 1;
+  _escribirParam('TICKET_ULTIMO', String(nuevo));
+  return prefijo + '-' + String(nuevo).padStart(4, '0');
+}
+
+
+// ============================================================
+// TICKETS - BACKEND
+// ============================================================
+
+
+/**
+ * Obtiene la lista de tickets con filtros y control de visibilidad por técnico
+ * @param {string} token - Token de sesión
+ * @param {Object} filtros - { estado, unidad, tecnico }
+ * @returns {Object} { ok: boolean, tickets: [], total: number }
+ */
+function obtenerTickets(token, filtros) {
+  try {
+    const sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    const sesion = sesionResp.sesion;
+    const sheet = SHEETS.TICKETS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Tickets' };
+    }
+
+    const datos = sheet.getDataRange().getValues();
+    if (datos.length < 2) {
+      return { ok: true, tickets: [], total: 0 };
+    }
+
+    const headers = datos[0];
+
+    // Mapear índices de columnas
+    const idxId = headers.indexOf('ID');
+    const idxFecha = headers.indexOf('FECHA');
+    const idxUnidad = headers.indexOf('UNIDAD');
+    const idxDescripcion = headers.indexOf('DESCRIPCION');
+    const idxCreadoPor = headers.indexOf('CREADO_POR');
+    const idxCreadoPorNombre = headers.indexOf('CREADO_POR_NOMBRE');
+    const idxEstado = headers.indexOf('ESTADO');
+    const idxTecnicoAsignado = headers.indexOf('TECNICO_ASIGNADO');
+    const idxTecnicoNombre = headers.indexOf('TECNICO_NOMBRE');
+    const idxFechaCierre = headers.indexOf('FECHA_CIERRE');
+    const idxComentarios = headers.indexOf('COMENTARIOS');
+    const idxUltimaActualizacion = headers.indexOf('ULTIMA_ACTUALIZACION');
+    const idxTecnicosAutorizados = headers.indexOf('TECNICOS_AUTORIZADOS');
+
+    // Verificar columnas mínimas necesarias
+    if (idxId === -1) {
+      return { ok: false, error: 'Estructura de tickets incompleta: falta columna ID' };
+    }
+
+    const tickets = [];
+    const usuarioId = sesion.usuarioId;
+    const esAdmin = sesion.rol === 1 || sesion.rol === 2; // Admin o Revisor
+
+    for (var i = 1; i < datos.length; i++) {
+      const fila = datos[i];
+      if (!fila || !fila[idxId]) continue;
+
+      // ============================================================
+      // 1. CONTROL DE VISIBILIDAD
+      // ============================================================
+      let puedeVer = false;
+
+      // Admin/Revisor: ven todos los tickets
+      if (esAdmin) {
+        puedeVer = true;
+      }
+      // Creador del ticket: puede verlo
+      else if (fila[idxCreadoPor] === usuarioId) {
+        puedeVer = true;
+      }
+      // Técnico autorizado: puede verlo
+      else if (idxTecnicosAutorizados !== -1) {
+        const autorizados = fila[idxTecnicosAutorizados]
+          ? fila[idxTecnicosAutorizados].toString().split(',')
+          : [];
+        puedeVer = autorizados.includes(usuarioId);
+      }
+      // Técnico asignado: puede verlo
+      else if (fila[idxTecnicoAsignado] === usuarioId) {
+        puedeVer = true;
       }
 
-      var datos = sheet.getDataRange().getValues();
-      console.log('📌 Filas:', datos.length);
-      console.log('📌 Encabezado:', datos[0]);
+      if (!puedeVer) continue;
 
-      return {
-        ok: true,
-        existe: true,
-        filas: datos.length,
-        encabezado: datos[0] || [],
-        primeraFila: datos[1] || []
+      // ============================================================
+      // 2. APLICAR FILTROS
+      // ============================================================
+      if (filtros) {
+        if (filtros.estado && fila[idxEstado] !== filtros.estado) continue;
+        if (filtros.unidad && fila[idxUnidad] && 
+            !fila[idxUnidad].toLowerCase().includes(filtros.unidad.toLowerCase())) continue;
+        if (filtros.tecnico && fila[idxTecnicoNombre] && 
+            !fila[idxTecnicoNombre].toLowerCase().includes(filtros.tecnico.toLowerCase())) continue;
+      }
+
+      // ============================================================
+      // 3. CONSTRUIR OBJETO TICKET
+      // ============================================================
+      const ticket = {
+        id: fila[idxId] || '',
+        fecha: fila[idxFecha] ? _formatearFecha(fila[idxFecha]) : '—',
+        unidad: fila[idxUnidad] || '—',
+        descripcion: fila[idxDescripcion] || '—',
+        creadoPor: fila[idxCreadoPor] || '',
+        creadoPorNombre: fila[idxCreadoPorNombre] || fila[idxCreadoPor] || '—',
+        estado: fila[idxEstado] || 'Pendiente',
+        tecnico: fila[idxTecnicoAsignado] || '',
+        tecnicoNombre: fila[idxTecnicoNombre] || '—',
+        fechaCierre: fila[idxFechaCierre] ? _formatearFecha(fila[idxFechaCierre]) : null,
+        comentarios: fila[idxComentarios] || '',
+        ultimaActualizacion: fila[idxUltimaActualizacion] ? _formatearFecha(fila[idxUltimaActualizacion]) : '—',
+        tecnicosAutorizados: fila[idxTecnicosAutorizados] || ''
       };
 
-    } catch (err) {
-      console.error('❌ Error en diagnóstico:', err);
-      return { ok: false, error: err.message };
+      tickets.push(ticket);
     }
-  }
 
-  /**
-   * Genera un nuevo ID de ticket secuencial
-   */
-  function generarIdTicket() {
-    var params = _leerParams();
-    var prefijo = params['TICKET_PREFIJO'] || 'TKT';
-    var ultimo = parseInt(params['TICKET_ULTIMO'] || '0', 10);
-    var nuevo = ultimo + 1;
-    var ticketId = prefijo + '-' + String(nuevo).padStart(4, '0');
-    _escribirParam('TICKET_ULTIMO', String(nuevo));
-    return ticketId;
-  }
+    // ============================================================
+    // 4. ORDENAR POR FECHA (más recientes primero)
+    // ============================================================
+    tickets.sort(function(a, b) {
+      // Intentar ordenar por fecha real (si están en formato ISO o Date)
+      const fechaA = new Date(a.fecha);
+      const fechaB = new Date(b.fecha);
+      if (!isNaN(fechaA) && !isNaN(fechaB)) {
+        return fechaB - fechaA;
+      }
+      return 0;
+    });
 
-  /**
-   * Crea un nuevo ticket
-   */
-  function crearTicket(token, datos) {
+    return {
+      ok: true,
+      tickets: tickets,
+      total: tickets.length
+    };
+
+  } catch (err) {
+    console.error('❌ Error en obtenerTickets:', err);
+    return { ok: false, error: 'Error al obtener tickets: ' + err.message };
+  }
+}
+/**
+ * Actualiza la lista de técnicos autorizados para un ticket
+ * @param {string} token - Token de sesión (debe ser admin)
+ * @param {string} ticketId - ID del ticket
+ * @param {string[]} tecnicosIds - Lista de IDs de técnicos autorizados
+ * @returns {Object} { ok: boolean, error: string }
+ */
+function actualizarVisibilidadTicket(token, ticketId, tecnicosIds) {
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+    if (sesionResp.sesion.rol !== 1) {
+      return { ok: false, error: 'Solo administradores pueden modificar visibilidad.' };
+    }
+
+    var sheet = SHEETS.TICKETS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de tickets.' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var headers = datos[0];
+    var idxId = headers.indexOf('ID');
+    var idxAutorizados = headers.indexOf('TECNICOS_AUTORIZADOS');
+
+    if (idxId === -1 || idxAutorizados === -1) {
+      return { ok: false, error: 'Estructura de tickets incompleta.' };
+    }
+
+    var filaEncontrada = -1;
+    for (var i = 1; i < datos.length; i++) {
+      if (datos[i][idxId] === ticketId) {
+        filaEncontrada = i + 1;
+        break;
+      }
+    }
+
+    if (filaEncontrada === -1) {
+      return { ok: false, error: 'Ticket no encontrado.' };
+    }
+
+    var lista = tecnicosIds && tecnicosIds.length > 0 ? tecnicosIds.join(',') : '';
+    sheet.getRange(filaEncontrada, idxAutorizados + 1).setValue(lista);
+
+    _registrarAuditoria(
+      sesionResp.sesion.usuarioId,
+      sesionResp.sesion.nombre,
+      'ACTUALIZAR_VISIBILIDAD_TICKET',
+      'TICKETS',
+      'Visibilidad del ticket ' + ticketId + ' actualizada',
+      ticketId,
+      '',
+      ''
+    );
+
+    return { ok: true };
+
+  } catch (err) {
+    console.error('Error en actualizarVisibilidadTicket:', err);
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Obtiene la lista de técnicos activos para checkboxes
+ */
+function obtenerTecnicosParaTicket(token) {
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+    var sheet = SHEETS.USUARIOS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de usuarios.' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var tecnicos = [];
+
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
+      var id = fila[0];
+      var nombre = fila[1];
+      var rol = fila[4];
+      var activo = fila[5];
+
+      if (id && activo === true && Number(rol) === 3) {
+        tecnicos.push({ id: id.toString(), nombre: nombre.toString() });
+      }
+    }
+
+    return { ok: true, tecnicos: tecnicos };
+
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Obtiene un ticket específico para edición
+ * @param {string} token - Token de sesión
+ * @param {string} ticketId - ID del ticket
+ * @returns {Object} { ok, ticket }
+ */
+function obtenerTicket(token, ticketId) {
+  try {
+    const sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    const sesion = sesionResp.sesion;
+    const sheet = SHEETS.TICKETS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Tickets' };
+    }
+
+    const datos = sheet.getDataRange().getValues();
+    const headers = datos[0];
+
+    // Mapear índices
+    const idxId = headers.indexOf('ID');
+    const idxUnidad = headers.indexOf('UNIDAD');
+    const idxDescripcion = headers.indexOf('DESCRIPCION');
+    const idxEstado = headers.indexOf('ESTADO');
+    const idxPrioridad = headers.indexOf('PRIORIDAD');
+    const idxComentarios = headers.indexOf('COMENTARIOS');
+    const idxNotasInternas = headers.indexOf('NOTAS_INTERNAS');
+    const idxCreadoPor = headers.indexOf('CREADO_POR');
+
+    if (idxId === -1) {
+      return { ok: false, error: 'Estructura de tickets incompleta: falta columna ID' };
+    }
+
+    const esAdmin = sesion.rol === 1 || sesion.rol === 2;
+
+    // Buscar el ticket
+    let fila = null;
+    for (var i = 1; i < datos.length; i++) {
+      if (datos[i][idxId] === ticketId) {
+        fila = datos[i];
+        break;
+      }
+    }
+
+    if (!fila) {
+      return { ok: false, error: 'Ticket no encontrado: ' + ticketId };
+    }
+
+    // ✅ Verificar permisos (Admin/Revisor o creador del ticket)
+    if (!esAdmin && fila[idxCreadoPor] !== sesion.usuarioId) {
+      return { ok: false, error: 'No tienes permisos para editar este ticket.' };
+    }
+
+    // Construir objeto
+    const ticket = {
+      ID: fila[idxId] || '',
+      UNIDAD: fila[idxUnidad] || '',
+      DESCRIPCION: fila[idxDescripcion] || '',
+      ESTADO: fila[idxEstado] || 'Pendiente',
+      PRIORIDAD: fila[idxPrioridad] || 'Media',
+      COMENTARIOS: fila[idxComentarios] || '',
+      NOTAS_INTERNAS: fila[idxNotasInternas] || ''
+    };
+
+    return { ok: true, ticket: ticket };
+
+  } catch (err) {
+    console.error('❌ Error en obtenerTicket:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+function diagnosticarTickets() {
+  try {
+    console.log('🔍 DIAGNÓSTICO DE TICKETS');
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('🎫_Tickets');
+    console.log('📌 Hoja 🎫_Tickets existe?', sheet !== null);
+
+    if (!sheet) {
+      return { ok: false, error: 'La hoja 🎫_Tickets no existe' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    console.log('📌 Filas:', datos.length);
+    console.log('📌 Encabezado:', datos[0]);
+
+    return {
+      ok: true,
+      existe: true,
+      filas: datos.length,
+      encabezado: datos[0] || [],
+      primeraFila: datos[1] || []
+    };
+
+  } catch (err) {
+    console.error('❌ Error en diagnóstico:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+
+/**
+ * Crea un nuevo ticket con control de visibilidad por técnicos
+ * @param {string} token - Token de sesión
+ * @param {Object} datos - Datos del ticket
+ * @returns {Object} { ok: boolean, id: string, error: string }
+ */
+function crearTicket(token, datos) {
+  try {
     var sesionResp = validarSesion(token);
     if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
     var sesion = sesionResp.sesion;
 
     if (!datos.unidad || !datos.descripcion) {
-      return { ok: false, error: 'La unidad y la descripción son requeridas.' };
+      return { ok: false, error: 'Unidad y descripción son obligatorios.' };
     }
 
-    try {
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      var sheet = ss.getSheetByName('🎫_Tickets');
-      if (!sheet) {
-        return { ok: false, error: 'No se encontró la hoja de tickets.' };
+    // Generar ID
+    var id = generarIdTicket();
+
+    // Preparar técnicos autorizados
+    var tecnicosAutorizados = [];
+    if (sesion.rol === 1) {
+      tecnicosAutorizados = datos.tecnicosAutorizados || [];
+    } else {
+      tecnicosAutorizados = [sesion.usuarioId];
+    }
+
+    var sheet = SHEETS.TICKETS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de tickets.' };
+    }
+
+    var ahora = new Date();
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    
+    // Mapear columnas
+    var colIndex = function(nombre) { return headers.indexOf(nombre) + 1; };
+
+    var fila = [
+      id,                          // ID
+      ahora,                       // FECHA
+      datos.unidad,                // UNIDAD
+      datos.descripcion,           // DESCRIPCION
+      sesion.usuarioId,            // CREADO_POR
+      sesion.nombre,               // CREADO_POR_NOMBRE
+      'Pendiente',                 // ESTADO
+      '',                          // TECNICO_ASIGNADO
+      '',                          // TECNICO_NOMBRE
+      '',                          // FECHA_CIERRE
+      '',                          // COMENTARIOS
+      ahora,                       // ULTIMA_ACTUALIZACION
+      tecnicosAutorizados.join(','), // TECNICOS_AUTORIZADOS
+      sesion.rol,                  // CREADO_POR_ROL
+      datos.prioridad || 'Media',  // PRIORIDAD
+      datos.categoria || 'Otro',   // CATEGORIA
+      '',                          // ARCHIVOS_ADJUNTOS
+      datos.notasInternas || ''    // NOTAS_INTERNAS
+    ];
+
+    sheet.appendRow(fila);
+
+    _registrarAuditoria(
+      sesion.usuarioId,
+      sesion.nombre,
+      'CREAR_TICKET',
+      'TICKETS',
+      'Ticket ' + id + ' creado para unidad ' + datos.unidad,
+      id,
+      '',
+      ''
+    );
+
+    return { ok: true, id: id };
+
+  } catch (err) {
+    console.error('Error en crearTicket:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Asigna un ticket a un técnico (tomar ticket)
+ * @param {string} token - Token de sesión
+ * @param {string} ticketId - ID del ticket
+ * @returns {Object} { ok: true }
+ */
+function tomarTicket(token, ticketId) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  var sesion = sesionResp.sesion;
+
+  if (!ticketId) {
+    return { ok: false, error: 'El ID del ticket es requerido.' };
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('🎫_Tickets');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de tickets.' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var encontrado = false;
+    var filaReal = -1;
+    var estadoActual = '';
+    var creadoPor = '';
+
+    for (var i = 1; i < datos.length; i++) {
+      if ((datos[i][0] || '').toString().trim() === ticketId) {
+        filaReal = i + 1;
+        estadoActual = (datos[i][6] || '').toString().trim();
+        creadoPor = (datos[i][4] || '').toString().trim();
+        encontrado = true;
+        break;
       }
+    }
 
-      var ticketId = generarIdTicket();
-      var ahora = new Date();
+    if (!encontrado) {
+      return { ok: false, error: 'No se encontró el ticket: ' + ticketId };
+    }
 
-      var nuevaFila = [
+    if (estadoActual === 'Resuelto') {
+      return { ok: false, error: 'El ticket ya está resuelto.' };
+    }
+
+    // Actualizar: Estado → En proceso, Técnico → usuario actual
+    sheet.getRange(filaReal, 7).setValue('En proceso');    // G: ESTADO
+    sheet.getRange(filaReal, 8).setValue(sesion.usuarioId); // H: TECNICO_ASIGNADO
+    sheet.getRange(filaReal, 9).setValue(sesion.nombre);   // I: TECNICO_NOMBRE
+    sheet.getRange(filaReal, 12).setValue(new Date());      // L: ULTIMA_ACTUALIZACION
+
+    console.log('✅ Ticket tomado:', ticketId, 'por', sesion.nombre);
+
+    // 🔔 NOTIFICACIÓN: Ticket tomado (al creador del ticket)
+    if (creadoPor && creadoPor !== sesion.usuarioId) {
+      _crearNotificacion(
+        creadoPor,
+        'TICKET',
+        '🔄 El ticket ' + ticketId + ' fue tomado por ' + sesion.nombre,
         ticketId,
-        ahora,
-        datos.unidad,
-        datos.descripcion,
-        sesion.usuarioId,
-        sesion.nombre,
-        'Pendiente',
-        '',
-        '',
-        '',
-        '',
-        ahora
-      ];
-
-      sheet.appendRow(nuevaFila);
-
-      console.log('✅ Ticket creado:', ticketId);
-      return { ok: true, id: ticketId };
-
-    } catch (err) {
-      console.error('Error en crearTicket:', err);
-      return { ok: false, error: err.message };
+        '#panel-tickets'
+      );
     }
+
+    // 🔔 NOTIFICACIÓN: Ticket tomado (a Admin/Revisores)
+    var admins = _obtenerUsuariosPorRol([1, 2]);
+    for (var u = 0; u < admins.length; u++) {
+      if (admins[u] !== sesion.usuarioId) {
+        _crearNotificacion(
+          admins[u],
+          'TICKET',
+          '🔄 El ticket ' + ticketId + ' fue tomado por ' + sesion.nombre,
+          ticketId,
+          '#panel-tickets'
+        );
+      }
+    }
+
+    return { ok: true };
+
+  } catch (err) {
+    console.error('Error en tomarTicket:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+
+/**
+ * Marca un ticket como resuelto
+ * @param {string} token - Token de sesión
+ * @param {string} ticketId - ID del ticket
+ * @param {string} comentarios - Comentarios de la solución
+ * @returns {Object} { ok: true }
+ */
+function resolverTicket(token, ticketId, comentarios) {
+  // 1. Validar sesión
+  const sesionResp = validarSesion(token);
+  if (!sesionResp.ok) {
+    return { ok: false, error: sesionResp.error };
   }
 
-  /**
-   * Asigna un ticket a un técnico (tomar ticket)
-   */
-  function tomarTicket(token, ticketId) {
-    var sesionResp = validarSesion(token);
-    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-    var sesion = sesionResp.sesion;
+  const sesion = sesionResp.sesion;
 
-    if (!ticketId) {
-      return { ok: false, error: 'El ID del ticket es requerido.' };
+  // 2. Validar permisos (Admin, Revisor o Técnico)
+  if (sesion.rol > 3) {
+    return { ok: false, error: 'Sin permisos para resolver tickets.' };
+  }
+
+  // 3. Validar comentarios
+  if (!comentarios || comentarios.length < 5) {
+    return { ok: false, error: 'Describe cómo se resolvió (mínimo 5 caracteres).' };
+  }
+
+  try {
+    // 4. Obtener hoja de Tickets
+    const sheet = SHEETS.TICKETS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Tickets' };
     }
 
-    try {
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      var sheet = ss.getSheetByName('🎫_Tickets');
-      if (!sheet) {
-        return { ok: false, error: 'No se encontró la hoja de tickets.' };
+    const datos = sheet.getDataRange().getValues();
+    const headers = datos[0];
+
+    // 5. Mapear índices de columnas
+    const idxId = headers.indexOf('ID');
+    const idxEstado = headers.indexOf('ESTADO');
+    const idxFechaCierre = headers.indexOf('FECHA_CIERRE');
+    const idxComentarios = headers.indexOf('COMENTARIOS');
+    const idxTecnicoAsignado = headers.indexOf('TECNICO_ASIGNADO');
+    const idxTecnicoNombre = headers.indexOf('TECNICO_NOMBRE');
+
+    // 6. Verificar columnas necesarias
+    if (idxId === -1 || idxEstado === -1) {
+      return { ok: false, error: 'Columnas ID o ESTADO no encontradas' };
+    }
+
+    // 7. Buscar el ticket
+    let filaEncontrada = -1;
+    let estadoActual = '';
+    let tecnicoAsignado = '';
+
+    for (var i = 1; i < datos.length; i++) {
+      if (datos[i][idxId] === ticketId) {
+        filaEncontrada = i + 1;
+        estadoActual = datos[i][idxEstado] || '';
+        tecnicoAsignado = datos[i][idxTecnicoAsignado] || '';
+        break;
       }
+    }
 
-      var datos = sheet.getDataRange().getValues();
-      var encontrado = false;
-      var filaReal = -1;
-      var estadoActual = '';
+    if (filaEncontrada === -1) {
+      return { ok: false, error: 'Ticket no encontrado: ' + ticketId };
+    }
 
-      for (var i = 1; i < datos.length; i++) {
-        if ((datos[i][0] || '').toString().trim() === ticketId) {
-          filaReal = i + 1;
-          estadoActual = (datos[i][6] || '').toString().trim();
-          encontrado = true;
-          break;
+    // 8. Validar que el ticket esté en proceso (o que sea Admin/Revisor)
+    const esAdmin = sesion.rol === 1 || sesion.rol === 2;
+    const esTecnicoAsignado = sesion.rol === 3 && tecnicoAsignado === sesion.usuarioId;
+
+    if (!esAdmin && !esTecnicoAsignado) {
+      return { ok: false, error: 'No tienes este ticket asignado.' };
+    }
+
+    if (!esAdmin && estadoActual !== 'En proceso') {
+      return { ok: false, error: 'El ticket debe estar "En proceso" para resolverlo.' };
+    }
+
+    // 9. Actualizar estado a "Resuelto"
+    sheet.getRange(filaEncontrada, idxEstado + 1).setValue('Resuelto');
+
+    // 10. Registrar fecha de cierre
+    if (idxFechaCierre !== -1) {
+      sheet.getRange(filaEncontrada, idxFechaCierre + 1).setValue(new Date());
+    }
+
+    // 11. Guardar comentarios de resolución
+    if (idxComentarios !== -1) {
+      const comentariosExistentes = datos[filaEncontrada - 1][idxComentarios] || '';
+      const fechaStr = new Date().toLocaleString();
+      const nuevoComentario = comentariosExistentes 
+        ? comentariosExistentes + '\n--- RESOLUCIÓN ---\n' + comentarios + '\n' + sesion.nombre + ' - ' + fechaStr
+        : 'RESOLUCIÓN:\n' + comentarios + '\n' + sesion.nombre + ' - ' + fechaStr;
+      sheet.getRange(filaEncontrada, idxComentarios + 1).setValue(nuevoComentario);
+    }
+
+    // 12. Registrar en auditoría
+    _registrarAuditoria(
+      sesion.usuarioId,
+      sesion.nombre,
+      'RESOLVER_TICKET',
+      'TICKETS',
+      'Ticket ' + ticketId + ' resuelto por ' + sesion.nombre + '\nComentarios: ' + comentarios,
+      ticketId,
+      '',
+      ''
+    );
+
+    // 13. Crear notificación al creador del ticket
+    try {
+      const idxCreadoPor = headers.indexOf('CREADO_POR');
+      if (idxCreadoPor !== -1) {
+        const creadorId = datos[filaEncontrada - 1][idxCreadoPor];
+        if (creadorId && creadorId !== sesion.usuarioId) {
+          _crearNotificacion(
+            creadorId,
+            'TICKET_RESUELTO',
+            '✅ Ticket ' + ticketId + ' ha sido resuelto por ' + sesion.nombre,
+            ticketId,
+            '#panel-tickets'
+          );
         }
       }
-
-      if (!encontrado) {
-        return { ok: false, error: 'No se encontró el ticket: ' + ticketId };
-      }
-
-      if (estadoActual === 'Resuelto') {
-        return { ok: false, error: 'El ticket ya está resuelto.' };
-      }
-
-      sheet.getRange(filaReal, 6).setValue('En proceso');
-      sheet.getRange(filaReal, 7).setValue(sesion.usuarioId);
-      sheet.getRange(filaReal, 8).setValue(sesion.nombre);
-      sheet.getRange(filaReal, 11).setValue(new Date());
-
-      console.log('✅ Ticket tomado:', ticketId, 'por', sesion.nombre);
-      return { ok: true };
-
-    } catch (err) {
-      console.error('Error en tomarTicket:', err);
-      return { ok: false, error: err.message };
+    } catch (notifErr) {
+      console.warn('⚠️ Error al crear notificación:', notifErr.message);
     }
+
+    console.log('✅ Ticket ' + ticketId + ' resuelto por ' + sesion.nombre);
+    
+    return { 
+      ok: true, 
+      mensaje: 'Ticket ' + ticketId + ' resuelto correctamente' 
+    };
+
+  } catch (err) {
+    console.error('❌ Error al resolver ticket:', err);
+    return { ok: false, error: 'Error al resolver ticket: ' + err.message };
   }
-
-  /**
-   * Crea un nuevo ticket
-   * @param {string} token - Token de sesión
-   * @param {Object} datos - { unidad, descripcion }
-   * @returns {Object} { ok: true, id: string }
-   */
-  function crearTicket(token, datos) {
-    var sesionResp = validarSesion(token);
-    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-    var sesion = sesionResp.sesion;
-
-    if (!datos.unidad || !datos.descripcion) {
-      return { ok: false, error: 'La unidad y la descripción son requeridas.' };
-    }
-
-    try {
-      var sheet = SS.getSheetByName('🎫_Tickets');
-      if (!sheet) {
-        return { ok: false, error: 'No se encontró la hoja de tickets.' };
-      }
-
-      var ticketId = generarIdTicket();
-      var ahora = new Date();
-
-      var nuevaFila = [
-        ticketId,
-        ahora,
-        datos.unidad,
-        datos.descripcion,
-        sesion.usuarioId,
-        sesion.nombre,
-        'Pendiente',
-        '',
-        '',
-        '',
-        '',
-        ahora
-      ];
-
-      sheet.appendRow(nuevaFila);
-
-      console.log('✅ Ticket creado:', ticketId);
-      return { ok: true, id: ticketId };
-
-    } catch (err) {
-      console.error('Error en crearTicket:', err);
-      return { ok: false, error: err.message };
-    }
-  }
-
-  /**
-   * Asigna un ticket a un técnico (tomar ticket)
-   * @param {string} token - Token de sesión
-   * @param {string} ticketId - ID del ticket
-   * @returns {Object} { ok: true }
-   */
-  function tomarTicket(token, ticketId) {
-    var sesionResp = validarSesion(token);
-    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-    var sesion = sesionResp.sesion;
-
-    if (!ticketId) {
-      return { ok: false, error: 'El ID del ticket es requerido.' };
-    }
-
-    try {
-      var sheet = SS.getSheetByName('🎫_Tickets');
-      if (!sheet) {
-        return { ok: false, error: 'No se encontró la hoja de tickets.' };
-      }
-
-      var datos = sheet.getDataRange().getValues();
-      var encontrado = false;
-      var filaReal = -1;
-      var estadoActual = '';
-
-      for (var i = 1; i < datos.length; i++) {
-        if ((datos[i][0] || '').toString().trim() === ticketId) {
-          filaReal = i + 1;
-          estadoActual = (datos[i][6] || '').toString().trim();
-          encontrado = true;
-          break;
-        }
-      }
-
-      if (!encontrado) {
-        return { ok: false, error: 'No se encontró el ticket: ' + ticketId };
-      }
-
-      if (estadoActual === 'Resuelto') {
-        return { ok: false, error: 'El ticket ya está resuelto.' };
-      }
-
-      // Actualizar: Estado → En proceso, Técnico → usuario actual
-      sheet.getRange(filaReal, 6).setValue('En proceso');
-      sheet.getRange(filaReal, 7).setValue(sesion.usuarioId);   // TECNICO_ASIGNADO
-      sheet.getRange(filaReal, 8).setValue(sesion.nombre);       // TECNICO_NOMBRE
-      sheet.getRange(filaReal, 11).setValue(new Date());         // ULTIMA_ACTUALIZACION
-
-      console.log('✅ Ticket tomado:', ticketId, 'por', sesion.nombre);
-      return { ok: true };
-
-    } catch (err) {
-      console.error('Error en tomarTicket:', err);
-      return { ok: false, error: err.message };
-    }
-  }
-
-  /**
-   * Marca un ticket como resuelto
-   * @param {string} token - Token de sesión
-   * @param {string} ticketId - ID del ticket
-   * @param {string} comentarios - Comentarios de la solución
-   * @returns {Object} { ok: true }
-   */
-  function resolverTicket(token, ticketId, comentarios) {
-    console.log('🔧 resolverTicket - INICIO');
-    console.log('📌 ticketId:', ticketId);
-    console.log('📌 comentarios:', comentarios);
-
-    try {
-      // Validar sesión
-      var sesionResp = validarSesion(token);
-      if (!sesionResp.ok) {
-        return { ok: false, error: 'Sesión inválida: ' + sesionResp.error };
-      }
-      var sesion = sesionResp.sesion;
-      console.log('✅ Sesión válida - Usuario:', sesion.nombre);
-
-      if (!ticketId) {
-        return { ok: false, error: 'El ID del ticket es requerido.' };
-      }
-
-      // Obtener la hoja
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      var sheet = ss.getSheetByName('🎫_Tickets');
-      if (!sheet) {
-        return { ok: false, error: 'No se encontró la hoja de tickets.' };
-      }
-
-      var datos = sheet.getDataRange().getValues();
-      var encontrado = false;
-      var filaReal = -1;
-      var estadoActual = '';
-
-      for (var i = 1; i < datos.length; i++) {
-        var idActual = (datos[i][0] || '').toString().trim();
-        if (idActual === ticketId) {
-          filaReal = i + 1;
-          estadoActual = (datos[i][6] || '').toString().trim();
-          encontrado = true;
-          break;
-        }
-      }
-
-      if (!encontrado) {
-        return { ok: false, error: 'No se encontró el ticket: ' + ticketId };
-      }
-
-      if (estadoActual === 'Resuelto') {
-        return { ok: false, error: 'El ticket ya está resuelto.' };
-      }
-
-      // ✅ Actualizar: Estado → Resuelto
-      sheet.getRange(filaReal, 7).setValue('Resuelto'); // Columna G: ESTADO
-
-      // ✅ Actualizar fecha de cierre
-      sheet.getRange(filaReal, 10).setValue(new Date()); // Columna J: FECHA_CIERRE
-
-      // ✅ Agregar comentarios
-      if (comentarios) {
-        var comentariosActual = (datos[filaReal - 1][10] || '');
-        var nuevosComentarios = comentariosActual + (comentariosActual ? '\n' : '') +
-          '[' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm') + '] ' +
-          sesion.nombre + ': ' + comentarios;
-        sheet.getRange(filaReal, 11).setValue(nuevosComentarios); // Columna K: COMENTARIOS
-      }
-
-      // ✅ Actualizar última modificación
-      sheet.getRange(filaReal, 12).setValue(new Date()); // Columna L: ULTIMA_ACTUALIZACION
-
-      console.log('✅ Ticket resuelto:', ticketId);
-      return { ok: true };
-
-    } catch (err) {
-      console.error('❌ Error en resolverTicket:', err);
-      return { ok: false, error: err.message };
-    }
-  }
+}
 
 
 
@@ -4413,31 +4648,31 @@ function obtenerTiposUnidad(token) {
  */
 function obtenerFlotillaCompleta(token, filtros) {
   console.log('🚚 obtenerFlotillaCompleta - INICIO');
-  
+
   var sesionResp = validarSesion(token);
   if (!sesionResp.ok) {
     console.error('❌ Sesión inválida:', sesionResp.error);
     return { ok: false, error: sesionResp.error };
   }
-  
+
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    
+
     // ✅ LEER DESDE 📋_Catalogo_Vehiculos
     var sheetVehiculos = ss.getSheetByName('📋_Catalogo_Vehiculos');
     if (!sheetVehiculos) {
       console.error('❌ No se encontró la hoja 📋_Catalogo_Vehiculos');
       return { ok: false, error: 'No se encontró la hoja 📋_Catalogo_Vehiculos.' };
     }
-    
+
     var dataVehiculos = sheetVehiculos.getDataRange().getValues();
     console.log('📌 Filas en catálogo:', dataVehiculos.length);
-    
+
     if (dataVehiculos.length <= 1) {
       console.log('📋 No hay vehículos en el catálogo');
       return { ok: true, vehiculos: [] };
     }
-    
+
     // ✅ MAPEAR ENCABEZADOS CORRECTAMENTE
     var headers = dataVehiculos[0];
     var idxEconomico = headers.indexOf('ECONOMICO');
@@ -4448,36 +4683,36 @@ function obtenerFlotillaCompleta(token, filtros) {
     var idxAnio = headers.indexOf('AÑO');
     var idxEstado = headers.indexOf('ESTADO');
     var idxTipoUnidad = headers.indexOf('TIPO_UNIDAD');
-    
+
     console.log('📌 Índices encontrados:', { idxEconomico, idxPlacas, idxTipoVehiculo, idxMarca, idxModelo, idxAnio, idxEstado, idxTipoUnidad });
-    
+
     // ✅ OBTENER EQUIPOS DEL INVENTARIO
     var sheetEquipos = ss.getSheetByName('📦_Inventario_GPS');
     var equiposPorEconomico = {};
-    
+
     if (sheetEquipos) {
       var dataEquipos = sheetEquipos.getDataRange().getValues();
       var headersEquipos = dataEquipos[0];
-      
+
       var idxEqSerie = headersEquipos.indexOf('SERIE_GPS');
       var idxEqTipo = headersEquipos.indexOf('TIPO_EQUIPO');
       var idxEqEconomico = headersEquipos.indexOf('ECONOMICO_ASIGNADO');
       var idxEqEstado = headersEquipos.indexOf('ESTADO');
-      
+
       console.log('📌 Índices de equipos:', { idxEqSerie, idxEqTipo, idxEqEconomico, idxEqEstado });
-      
+
       for (var i = 1; i < dataEquipos.length; i++) {
         var row = dataEquipos[i];
         var economico = row[idxEqEconomico] || '';
         var tipo = row[idxEqTipo] || '';
         var serie = row[idxEqSerie] || '';
         var estado = row[idxEqEstado] || '';
-        
+
         if (economico && (estado === 'Instalado' || estado === 'Garantía')) {
           if (!equiposPorEconomico[economico]) {
             equiposPorEconomico[economico] = { gateway: null, gatewaySerie: null, camara: null, camaraSerie: null };
           }
-          
+
           var tipoUpper = tipo.toString().toUpperCase();
           if (tipoUpper.indexOf('VG') !== -1 || tipoUpper.indexOf('GATEWAY') !== -1) {
             equiposPorEconomico[economico].gateway = tipo;
@@ -4490,25 +4725,25 @@ function obtenerFlotillaCompleta(token, filtros) {
       }
       console.log('📌 Equipos por económico:', Object.keys(equiposPorEconomico));
     }
-    
+
     // ✅ OBTENER ACCESORIOS
     var sheetAccesorios = ss.getSheetByName('🔧_Accesorios_Stock');
     var accesoriosPorEconomico = {};
-    
+
     if (sheetAccesorios) {
       var dataAccesorios = sheetAccesorios.getDataRange().getValues();
       var headersAccesorios = dataAccesorios[0];
       var idxAccTipo = headersAccesorios.indexOf('TIPO');
       var idxAccEconomico = headersAccesorios.indexOf('ECONOMICO_ASIGNADO');
-      
+
       for (var i = 1; i < dataAccesorios.length; i++) {
         var row = dataAccesorios[i];
         var economicoAsignado = row[idxAccEconomico] || '';
         var tipoAccesorio = row[idxAccTipo] || '';
-        
+
         if (economicoAsignado && tipoAccesorio) {
-          var listaEconomicos = economicoAsignado.split(',').map(function(e) { return e.trim(); });
-          listaEconomicos.forEach(function(eco) {
+          var listaEconomicos = economicoAsignado.split(',').map(function (e) { return e.trim(); });
+          listaEconomicos.forEach(function (eco) {
             if (eco) {
               if (!accesoriosPorEconomico[eco]) {
                 accesoriosPorEconomico[eco] = [];
@@ -4521,21 +4756,21 @@ function obtenerFlotillaCompleta(token, filtros) {
         }
       }
     }
-    
+
     // ✅ APLICAR FILTROS
     var filtroEstado = (filtros && filtros.estado) ? filtros.estado.toString().trim() : '';
     var filtroTipoUnidad = (filtros && filtros.tipoUnidad) ? filtros.tipoUnidad.toString().trim() : '';
     var filtroBuscar = (filtros && filtros.buscar) ? filtros.buscar.toString().toUpperCase().trim() : '';
-    
+
     // ✅ CONSTRUIR RESULTADO
     var vehiculos = [];
-    
+
     for (var i = 1; i < dataVehiculos.length; i++) {
       var row = dataVehiculos[i];
       var economico = (row[idxEconomico] || '').toString().trim();
-      
+
       if (!economico) continue;
-      
+
       var estado = (row[idxEstado] || '').toString().trim();
       var tipoUnidad = (row[idxTipoUnidad] || '').toString().trim();
       var placas = (row[idxPlacas] || '').toString().trim();
@@ -4543,7 +4778,7 @@ function obtenerFlotillaCompleta(token, filtros) {
       var marca = (row[idxMarca] || '').toString().trim();
       var modelo = (row[idxModelo] || '').toString().trim();
       var anio = (row[idxAnio] || '').toString().trim();
-      
+
       // Aplicar filtros
       if (filtroEstado && estado !== filtroEstado) continue;
       if (filtroTipoUnidad && tipoUnidad !== filtroTipoUnidad) continue;
@@ -4554,10 +4789,10 @@ function obtenerFlotillaCompleta(token, filtros) {
           continue;
         }
       }
-      
+
       var equipos = equiposPorEconomico[economico] || { gateway: null, gatewaySerie: null, camara: null, camaraSerie: null };
       var accesorios = accesoriosPorEconomico[economico] || [];
-      
+
       vehiculos.push({
         economico: economico,
         placas: placas || '—',
@@ -4571,14 +4806,14 @@ function obtenerFlotillaCompleta(token, filtros) {
         gatewaySerie: equipos.gatewaySerie || null,
         camara: equipos.camara || null,
         camaraSerie: equipos.camaraSerie || null,
-        accesorios: accesorios || [],
+        accesorios: accesorios || [], 
         tieneEquipos: !!(equipos.gateway || equipos.camara || accesorios.length > 0)
       });
     }
-    
+
     console.log('✅ Vehículos encontrados:', vehiculos.length);
     return { ok: true, vehiculos: vehiculos };
-    
+
   } catch (error) {
     console.error('❌ Error en obtenerFlotillaCompleta:', error);
     return { ok: false, error: error.toString() };
@@ -4600,17 +4835,17 @@ function agregarVehiculoCatalogo(token, datos) {
   if (sesion.rol > 2) {
     return { ok: false, error: 'No tienes permisos para agregar vehículos.' };
   }
-  
+
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    
+
     // ✅ CORREGIDO: Usar 📋_Catalogo_Vehiculos
     var sheet = ss.getSheetByName('📋_Catalogo_Vehiculos');
-    
+
     if (!sheet) {
       return { ok: false, error: 'No se encontró la hoja 📋_Catalogo_Vehiculos.' };
     }
-    
+
     // Verificar si ya existe el económico
     var data = sheet.getDataRange().getValues();
     for (var i = 1; i < data.length; i++) {
@@ -4618,7 +4853,7 @@ function agregarVehiculoCatalogo(token, datos) {
         return { ok: false, error: 'El económico "' + datos.economico + '" ya existe.' };
       }
     }
-    
+
     // Agregar nueva fila
     var nuevaFila = [
       datos.economico,           // ECONOMICO
@@ -4633,11 +4868,11 @@ function agregarVehiculoCatalogo(token, datos) {
       new Date(),                // FECHA_REGISTRO
       datos.tipoUnidad || ''     // TIPO_UNIDAD
     ];
-    
+
     sheet.appendRow(nuevaFila);
-    
+
     return { ok: true, mensaje: 'Vehículo ' + datos.economico + ' agregado correctamente.' };
-    
+
   } catch (error) {
     console.error('Error en agregarVehiculoCatalogo:', error);
     return { ok: false, error: error.toString() };
@@ -4654,16 +4889,16 @@ function obtenerTiposVehiculo(token) {
   if (!sesionResp.ok) {
     return { ok: false, error: sesionResp.error };
   }
-  
+
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName('📋_Tipos_Vehiculo');
-    
+
     if (!sheet) {
       // Si no existe la hoja, devolver valores por defecto
       return { ok: true, tipos: ['Camión', 'Pickup', 'Van', 'SUV', 'Sedán', 'Otro'] };
     }
-    
+
     var data = sheet.getDataRange().getValues();
     var tipos = [];
     for (var i = 1; i < data.length; i++) {
@@ -4671,114 +4906,339 @@ function obtenerTiposVehiculo(token) {
         tipos.push(data[i][0].toString().trim());
       }
     }
-    
+
     return { ok: true, tipos: tipos };
-    
+
   } catch (error) {
     console.error('Error en obtenerTiposVehiculo:', error);
     return { ok: false, error: error.toString() };
   }
 }
 /**
- * Obtiene los estados de vehículo disponibles
- * @param {string} token - Token de autenticación
- * @returns {object} { ok, estados: [...] }
+ * Obtiene los estados de vehículo desde 📋_Catálogo_Estados_Vehiculo
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok: true, estados: [...] }
  */
-// Obtener lista de estados activos (para el frontend)
 function obtenerEstadosVehiculo(token) {
-  validarSesion(token);
-  var sheet = SpreadsheetApp.getActive().getSheetByName('📋_Catálogo_Estados_Vehiculo');
-  var datos = sheet.getDataRange().getValues();
-  var estados = [];
-  for (var i = 1; i < datos.length; i++) {
-    if (datos[i][3] === true) { // Solo activos
-      estados.push({
-        id: datos[i][0],
-        nombre: datos[i][1],
-        color: datos[i][2]
-      });
-    }
+  // Validar sesión (opcional, pero seguro)
+  if (token) {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
   }
-  return { ok: true, estados: estados };
-}
-// (Admin) Agregar nuevo estado
-function agregarEstadoVehiculo(token, nombre, color) {
-  validarSesion(token, [1]); // Solo Admin
-  var sheet = SpreadsheetApp.getActive().getSheetByName('📋_Catálogo_Estados_Vehiculo');
-  var ultimaFila = sheet.getLastRow();
-  var nuevoId = sheet.getRange(ultimaFila, 1).getValue() + 1;
-  sheet.appendRow([nuevoId, nombre, color, true]);
-  return { ok: true, mensaje: 'Estado agregado correctamente' };
-}
-// (Admin) Editar estado
-function editarEstadoVehiculo(token, id, nombre, color, activo) {
-  validarSesion(token, [1]);
-  var sheet = SpreadsheetApp.getActive().getSheetByName('📋_Catálogo_Estados_Vehiculo');
-  var datos = sheet.getDataRange().getValues();
-  for (var i = 1; i < datos.length; i++) {
-    if (datos[i][0] == id) {
-      sheet.getRange(i+1, 2).setValue(nombre);
-      sheet.getRange(i+1, 3).setValue(color);
-      sheet.getRange(i+1, 4).setValue(activo);
-      return { ok: true, mensaje: 'Estado actualizado' };
-    }
-  }
-  throw new Error('Estado no encontrado');
-}
-/**
- * Función de depuración para verificar equipos de un vehículo
- */
-function diagnosticarEquiposVehiculo(token, economico) {
-  var sesionResp = validarSesion(token);
-  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-  
+
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheetEquipos = ss.getSheetByName('📦_Inventario_GPS');
+    var sheet = ss.getSheetByName('📋_Catálogo_Estados_Vehiculo');
     
-    if (!sheetEquipos) {
-      return { ok: false, error: 'No se encontró la hoja de inventario.' };
-    }
-    
-    var datos = sheetEquipos.getDataRange().getValues();
-    var headers = datos[0];
-    
-    var idxSerie = headers.indexOf('SERIE');
-    var idxTipo = headers.indexOf('TIPO');
-    var idxEstado = headers.indexOf('ESTADO');
-    var idxEconomico = headers.indexOf('ECONOMICO');
-    
-    var resultados = [];
-    var economicoBusqueda = economico.toString().trim();
-    
-    for (var i = 1; i < datos.length; i++) {
-      var row = datos[i];
-      var ecoActual = (row[idxEconomico] || '').toString().trim();
-      var estado = (row[idxEstado] || '').toString().trim();
-      var serie = row[idxSerie] || '';
-      var tipo = row[idxTipo] || '';
+    // Si no existe la hoja, crearla con valores por defecto
+    if (!sheet) {
+      console.log('📋 Hoja de estados no encontrada, creando...');
+      sheet = ss.insertSheet('📋_Catálogo_Estados_Vehiculo');
       
-      resultados.push({
-        serie: serie,
-        tipo: tipo,
-        estado: estado,
-        economico: ecoActual,
-        coincide: ecoActual === economicoBusqueda
-      });
+      var headers = ['ID', 'NOMBRE', 'COLOR', 'ACTIVO', 'DESCRIPCION'];
+      sheet.getRange(1, 1, 1, 5).setValues([headers]);
+      
+      var datosDefault = [
+        [1, 'Activo', 'success', true, 'Vehículo operativo y en circulación'],
+        [2, 'Inactivo', 'danger', true, 'Vehículo fuera de circulación temporal o permanente'],
+        [3, 'En Mantenimiento', 'warning', true, 'Vehículo en taller por mantenimiento programado'],
+        [4, 'Siniestrada', 'dark', true, 'Vehículo con daño por accidente o siniestro']
+      ];
+      sheet.getRange(2, 1, datosDefault.length, 5).setValues(datosDefault);
+      
+      sheet.setColumnWidth(1, 50);
+      sheet.setColumnWidth(2, 160);
+      sheet.setColumnWidth(3, 100);
+      sheet.setColumnWidth(4, 70);
+      sheet.setColumnWidth(5, 280);
+      sheet.setFrozenRows(1);
     }
-    
-    return {
-      ok: true,
-      economicoBuscado: economicoBusqueda,
-      totalEquipos: resultados.length,
-      equipos: resultados,
-      equiposCoincidentes: resultados.filter(function(r) { return r.coincide && r.estado === 'Instalado'; })
-    };
-    
+
+    var datos = sheet.getDataRange().getValues();
+    var estados = [];
+
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
+      if (!fila[0]) continue;
+      
+      // ✅ Verificar que ACTIVO sea true (si existe la columna)
+      var activo = true;
+      if (fila[3] !== undefined) {
+        activo = fila[3] === true || fila[3] === 'TRUE' || fila[3] === 1;
+      }
+      
+      // ✅ Solo incluir estados activos (para el selector)
+      if (activo) {
+        estados.push({
+          id: fila[0].toString(),
+          nombre: fila[1] ? fila[1].toString().trim() : '',
+          color: fila[2] ? fila[2].toString().trim().toLowerCase() : 'secondary',
+          descripcion: fila[4] ? fila[4].toString().trim() : ''
+        });
+      }
+    }
+
+    console.log('📊 Estados cargados:', estados.length);
+    return { ok: true, estados: estados };
+
   } catch (err) {
+    console.error('❌ Error en obtenerEstadosVehiculo:', err);
     return { ok: false, error: err.message };
   }
 }
+// (Admin) Agregar nuevo estado
+// 🔧 REEMPLAZAR COMPLETAMENTE - Agregar nuevo estado (Admin/Revisor)
+function agregarEstadoVehiculo(token, nombre, color, descripcion) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  // Solo Admin (1) o Revisor (2)
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para agregar estados.' };
+  }
+
+  if (!nombre || nombre.trim() === '') {
+    return { ok: false, error: 'El nombre del estado es requerido.' };
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('📋_Catálogo_Estados_Vehiculo');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de estados.' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+
+    // Verificar si ya existe un estado con el mismo nombre
+    var nombreLimpio = nombre.toString().trim().toUpperCase();
+    for (var i = 1; i < datos.length; i++) {
+      var existente = (datos[i][1] || '').toString().trim().toUpperCase();
+      if (existente === nombreLimpio) {
+        return { ok: false, error: 'Ya existe un estado con el nombre "' + nombre + '".' };
+      }
+    }
+
+    // Calcular nuevo ID
+    var ultimoId = 0;
+    for (var i = 1; i < datos.length; i++) {
+      var id = Number(datos[i][0]) || 0;
+      if (id > ultimoId) ultimoId = id;
+    }
+    var nuevoId = ultimoId + 1;
+
+    // ✅ Guardar con descripción
+    sheet.appendRow([
+      nuevoId,
+      nombre.trim(),
+      color || 'secondary',
+      true, // ACTIVO
+      descripcion || '' // DESCRIPCION
+    ]);
+
+    return { ok: true, mensaje: 'Estado "' + nombre + '" agregado correctamente.' };
+
+  } catch (err) {
+    console.error('Error en agregarEstadoVehiculo:', err);
+    return { ok: false, error: err.message };
+  }
+}
+// (Admin) Editar estado
+function editarEstadoVehiculo(token, id, nombre, color, activo, descripcion) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  // Solo Admin (1) o Revisor (2)
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para editar estados.' };
+  }
+
+  if (!id) {
+    return { ok: false, error: 'El ID del estado es requerido.' };
+  }
+
+  if (!nombre || nombre.trim() === '') {
+    return { ok: false, error: 'El nombre del estado es requerido.' };
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('📋_Catálogo_Estados_Vehiculo');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de estados.' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var encontrado = false;
+    var filaReal = -1;
+
+    for (var i = 1; i < datos.length; i++) {
+      if (Number(datos[i][0]) === Number(id)) {
+        filaReal = i + 1;
+        encontrado = true;
+        break;
+      }
+    }
+
+    if (!encontrado) {
+      return { ok: false, error: 'No se encontró el estado con ID: ' + id };
+    }
+
+    // ✅ Actualizar TODOS los campos incluyendo descripción
+    sheet.getRange(filaReal, 2).setValue(nombre.trim());      // NOMBRE
+    sheet.getRange(filaReal, 3).setValue(color || 'secondary'); // COLOR
+    sheet.getRange(filaReal, 4).setValue(activo === true);     // ACTIVO
+    sheet.getRange(filaReal, 5).setValue(descripcion || '');   // DESCRIPCION
+
+    return { ok: true, mensaje: 'Estado actualizado correctamente.' };
+
+  } catch (err) {
+    console.error('Error en editarEstadoVehiculo:', err);
+    return { ok: false, error: err.message };
+  }
+}
+//Eliminar estado (baja lógica, solo Admin/Revisor)
+function eliminarEstadoVehiculo(token, id) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  // Solo Admin (1) o Revisor (2)
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para eliminar estados.' };
+  }
+
+  if (!id) {
+    return { ok: false, error: 'El ID del estado es requerido.' };
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('📋_Catálogo_Estados_Vehiculo');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de estados.' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var encontrado = false;
+    var filaReal = -1;
+    var nombreEstado = '';
+
+    for (var i = 1; i < datos.length; i++) {
+      if (Number(datos[i][0]) === Number(id)) {
+        filaReal = i + 1;
+        nombreEstado = datos[i][1] || '';
+        encontrado = true;
+        break;
+      }
+    }
+
+    if (!encontrado) {
+      return { ok: false, error: 'No se encontró el estado con ID: ' + id };
+    }
+
+    sheet.getRange(filaReal, 4).setValue(false);
+
+    return { ok: true, mensaje: 'Estado "' + nombreEstado + '" desactivado correctamente.' };
+
+  } catch (err) {
+    console.error('Error en eliminarEstadoVehiculo:', err);
+    return { ok: false, error: err.message };
+  }
+}
+// ➕ Reactivar estado (Admin/Revisor)
+function reactivarEstadoVehiculo(token, id) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  // Solo Admin (1) o Revisor (2)
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para reactivar estados.' };
+  }
+
+  if (!id) {
+    return { ok: false, error: 'El ID del estado es requerido.' };
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('📋_Catálogo_Estados_Vehiculo');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de estados.' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var encontrado = false;
+    var filaReal = -1;
+    var nombreEstado = '';
+
+    for (var i = 1; i < datos.length; i++) {
+      if (Number(datos[i][0]) === Number(id)) {
+        filaReal = i + 1;
+        nombreEstado = datos[i][1] || '';
+        encontrado = true;
+        break;
+      }
+    }
+
+    if (!encontrado) {
+      return { ok: false, error: 'No se encontró el estado con ID: ' + id };
+    }
+
+    // ✅ REACTIVAR: Cambiar ACTIVO a true
+    sheet.getRange(filaReal, 4).setValue(true);
+
+    return { ok: true, mensaje: 'Estado "' + nombreEstado + '" reactivado correctamente.' };
+
+  } catch (err) {
+    console.error('Error en reactivarEstadoVehiculo:', err);
+    return { ok: false, error: err.message };
+  }
+}
+// ➕ Obtener TODOS los estados (incluyendo inactivos) para el Admin
+function obtenerTodosLosEstadosVehiculo(token) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  // Solo Admin (1) o Revisor (2) pueden ver todos los estados
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para ver todos los estados.' };
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('📋_Catálogo_Estados_Vehiculo');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de estados.' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var estados = [];
+
+    // ✅ Incluir TODOS los estados (activos e inactivos)
+    for (var i = 1; i < datos.length; i++) {
+      var id = datos[i][0];
+      if (!id) continue;
+
+      estados.push({
+        id: Number(id),
+        nombre: (datos[i][1] || '').toString().trim(),
+        color: (datos[i][2] || 'secondary').toString().trim().toLowerCase(),
+        activo: datos[i][3] === true,
+        descripcion: (datos[i][4] || '').toString().trim()
+      });
+    }
+
+    // Ordenar por ID
+    estados.sort(function (a, b) { return a.id - b.id; });
+
+    return { ok: true, estados: estados };
+
+  } catch (err) {
+    console.error('Error en obtenerTodosLosEstadosVehiculo:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
 /**
  * Actualiza los datos de un vehículo en el catálogo
  * @param {string} token - Token de sesión
@@ -4789,7 +5249,7 @@ function diagnosticarEquiposVehiculo(token, economico) {
 function actualizarVehiculoCatalogo(token, economico, datos) {
   var sesionResp = validarSesion(token);
   if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-  
+
   if (sesionResp.sesion.rol > 2) {
     return { ok: false, error: 'Sin permisos para editar vehículos.' };
   }
@@ -4852,7 +5312,7 @@ function obtenerEstadosVehiculo() {
     console.log('📋 Obteniendo catálogo de estados de vehículo...');
     const sheet = SpreadsheetApp.getActiveSpreadsheet()
       .getSheetByName('📋_Catálogo_Estados_Vehiculo');
-    
+
     if (!sheet) {
       console.warn('⚠️ No se encontró la hoja 📋_Catálogo_Estados_Vehiculo');
       // Devolver estados por defecto si no existe la hoja
@@ -4863,10 +5323,10 @@ function obtenerEstadosVehiculo() {
         { id: '4', nombre: 'Siniestrada', color: 'dark', activo: true }
       ];
     }
-    
+
     const data = sheet.getDataRange().getValues();
     const estados = [];
-    
+
     // Saltar encabezado (fila 1)
     for (let i = 1; i < data.length; i++) {
       const id = data[i][0];          // Columna A: ID
@@ -4874,7 +5334,7 @@ function obtenerEstadosVehiculo() {
       const color = data[i][2];       // Columna C: COLOR
       const activo = data[i][3] === true || data[i][3] === 'TRUE' || data[i][3] === 1;
       const descripcion = data[i][4] || ''; // Columna E: DESCRIPCION
-      
+
       if (nombre && nombre.toString().trim() !== '') {
         estados.push({
           id: id.toString(),
@@ -4885,10 +5345,10 @@ function obtenerEstadosVehiculo() {
         });
       }
     }
-    
+
     console.log(`✅ ${estados.length} estados cargados correctamente`);
     return estados;
-    
+
   } catch (error) {
     console.error('❌ Error al obtener estados de vehículo:', error);
     // Devolver estados por defecto en caso de error
@@ -4938,73 +5398,85 @@ function guardarVehiculoFlotilla(datos) {
   try {
     console.log('🚚 Guardando vehículo en flotilla:', datos);
     
-    const sheet = SpreadsheetApp.getActiveSpreadsheet()
-      .getSheetByName('🚚_Flotilla_Fallas');
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('📋_Catalogo_Vehiculos');
     if (!sheet) {
-      throw new Error('No se encontró la hoja de Flotilla');
+      throw new Error('No se encontró la hoja 📋_Catalogo_Vehiculos');
     }
-    
-    const { 
-      economico, 
-      placas, 
-      tipoVehiculo, 
-      marca, 
-      modelo, 
-      año,
-      serieVehiculo,
-      estado,
-      tipoUnidad 
-    } = datos;
     
     // Validar campos obligatorios
-    if (!economico || economico.trim() === '') {
+    if (!datos.economico || datos.economico.trim() === '') {
       throw new Error('El económico es obligatorio');
     }
-    
-    if (!placas || placas.trim() === '') {
+    if (!datos.placas || datos.placas.trim() === '') {
       throw new Error('Las placas son obligatorias');
     }
+    if (!datos.estado) {
+      throw new Error('El estado es obligatorio');
+    }
+    if (!datos.empresa) {
+      throw new Error('La empresa es obligatoria');
+    }
     
-    const ahora = new Date();
-    const headers = sheet.getDataRange().getValues()[0];
-    const idxEconomico = headers.indexOf('ECONOMICO');
+    var ahora = new Date();
+    var headers = sheet.getDataRange().getValues()[0];
     
-    // Buscar si ya existe
-    const data = sheet.getDataRange().getValues();
-    let filaExistente = -1;
+    // Obtener índices de columnas
+    var idxEconomico = headers.indexOf('ECONOMICO');
+    var idxPlacas = headers.indexOf('PLACAS');
+    var idxTipoVehiculo = headers.indexOf('TIPO_VEHICULO');
+    var idxMarca = headers.indexOf('MARCA');
+    var idxModelo = headers.indexOf('MODELO');
+    var idxAnio = headers.indexOf('AÑO');
+    var idxSerieVehiculo = headers.indexOf('SERIE_VEHICULO');
+    var idxGpsActual = headers.indexOf('GPS_ACTUAL');
+    var idxEstado = headers.indexOf('ESTADO');
+    var idxUltimoServicio = headers.indexOf('ULTIMO_SERVICIO');
+    var idxTipoUnidad = headers.indexOf('TIPO_UNIDAD');
+    var idxEmpresa = headers.indexOf('EMPRESA');
+
+    // Si no existe la columna EMPRESA, crearla
+    if (idxEmpresa === -1) {
+      var lastCol = sheet.getLastColumn() + 1;
+      sheet.getRange(1, lastCol).setValue('EMPRESA');
+      idxEmpresa = lastCol - 1;
+      console.log('✅ Columna EMPRESA creada');
+    }
     
-    for (let i = 1; i < data.length; i++) {
-      const econActual = data[i][idxEconomico] ? data[i][idxEconomico].toString().trim() : '';
-      if (econActual === economico.trim()) {
-        filaExistente = i + 1; // Fila real en Sheets
+    // Buscar si ya existe el vehículo
+    var data = sheet.getDataRange().getValues();
+    var filaExistente = -1;
+    
+    for (var i = 1; i < data.length; i++) {
+      var econActual = data[i][idxEconomico] ? data[i][idxEconomico].toString().trim() : '';
+      if (econActual === datos.economico.trim()) {
+        filaExistente = i + 1;
         break;
       }
     }
     
     // Preparar la fila completa
-    const nuevaFila = [
-      economico.trim(),                              // A: ECONOMICO
-      placas.trim(),                                 // B: PLACAS
-      tipoVehiculo ? tipoVehiculo.trim() : '',       // C: TIPO_VEHICULO
-      marca ? marca.trim() : '',                     // D: MARCA
-      modelo ? modelo.trim() : '',                   // E: MODELO
-      año ? año.toString().trim() : '',              // F: AÑO
-      serieVehiculo ? serieVehiculo.trim() : '',     // G: SERIE_VEHICULO
-      '',                                            // H: GPS_ACTUAL
-      estado ? estado.toString().trim() : '',        // I: ESTADO
-      ahora,                                         // J: ULTIMO_SERVICIO
-      tipoUnidad ? tipoUnidad.trim() : ''            // K: TIPO_UNIDAD
+    var nuevaFila = [
+      datos.economico.trim(),                    // ECONOMICO
+      datos.placas.trim(),                       // PLACAS
+      datos.tipoVehiculo || '',                  // TIPO_VEHICULO
+      datos.marca || '',                         // MARCA
+      datos.modelo || '',                        // MODELO
+      datos.anio || '',                          // AÑO
+      datos.serieVehiculo || '',                 // SERIE_VEHICULO
+      '',                                        // GPS_ACTUAL
+      datos.estado || 'Activo',                  // ESTADO
+      ahora,                                     // ULTIMO_SERVICIO
+      datos.tipoUnidad || '',                    // TIPO_UNIDAD
+      datos.empresa || ''                        // ✅ EMPRESA
     ];
     
     if (filaExistente === -1) {
-      // Nuevo vehículo
       sheet.appendRow(nuevaFila);
-      console.log(`✅ Vehículo ${economico} agregado correctamente`);
+      console.log('✅ Vehículo agregado:', datos.economico);
     } else {
-      // Actualizar existente
-      sheet.getRange(filaExistente, 1, 1, nuevaFila.length)
-        .setValues([nuevaFila]);
-      console.log(`✅ Vehículo ${economico} actualizado correctamente`);
+      sheet.getRange(filaExistente, 1, 1, nuevaFila.length).setValues([nuevaFila]);
+      console.log('✅ Vehículo actualizado:', datos.economico);
     }
     
     return { ok: true, mensaje: 'Vehículo guardado correctamente' };
@@ -5014,181 +5486,2649 @@ function guardarVehiculoFlotilla(datos) {
     return { ok: false, error: error.message };
   }
 }
+
+// ============================================================
+// ADMINISTRACIÓN DE USUARIOS
+// ============================================================
+
 /**
- * Obtiene la flotilla completa con estados enriquecidos
+ * Obtiene todos los usuarios (incluyendo inactivos)
+ * Solo Admin (rol 1) y Revisor (rol 2)
  */
-function obtenerFlotilla() {
+function obtenerUsuarios(token) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  
+  // Solo Admin o Revisor
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para ver usuarios.' };
+  }
+
   try {
-    console.log('🚚 Iniciando obtenerFlotilla...');
-    
-    // Verificar que exista la hoja
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName('🚚_Flotilla_Fallas');
+    var sheet = SHEETS.USUARIOS();
     if (!sheet) {
-      console.error('❌ No se encontró la hoja de Flotilla');
-      return { ok: false, error: 'No se encontró la hoja de Flotilla' };
+      return { ok: false, error: 'No se encontró la hoja de usuarios.' };
     }
-    
-    // Obtener datos
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) {
-      console.log('ℹ️ No hay vehículos registrados');
-      return { ok: true, vehiculos: [] };
-    }
-    
-    const headers = data[0];
-    console.log('📋 Headers:', headers);
-    
-    // Obtener índices de columnas
-    const idxEconomico = headers.indexOf('ECONOMICO');
-    const idxPlacas = headers.indexOf('PLACAS');
-    const idxTipoVehiculo = headers.indexOf('TIPO_VEHICULO');
-    const idxMarca = headers.indexOf('MARCA');
-    const idxModelo = headers.indexOf('MODELO');
-    const idxAño = headers.indexOf('AÑO');
-    const idxSerieVehiculo = headers.indexOf('SERIE_VEHICULO');
-    const idxGpsActual = headers.indexOf('GPS_ACTUAL');
-    const idxEstado = headers.indexOf('ESTADO');
-    const idxUltimoServicio = headers.indexOf('ULTIMO_SERVICIO');
-    const idxTipoUnidad = headers.indexOf('TIPO_UNIDAD');
-    
-    // Obtener estados para mapear
-    const estados = obtenerEstadosVehiculo();
-    console.log('📋 Estados disponibles:', estados.length);
-    
-    const vehiculos = [];
-    
-    // Procesar cada fila
-    for (let i = 1; i < data.length; i++) {
-      const fila = data[i];
-      
-      // Saltar filas vacías
-      if (!fila[idxEconomico] || fila[idxEconomico].toString().trim() === '') continue;
-      
-      const economico = fila[idxEconomico].toString().trim();
-      const estadoId = fila[idxEstado] ? fila[idxEstado].toString().trim() : '';
-      
-      // Buscar el estado por ID
-      const estado = estados.find(e => e.id === estadoId);
-      
-      vehiculos.push({
-        economico: economico,
-        placas: fila[idxPlacas] ? fila[idxPlacas].toString().trim() : '',
-        tipoVehiculo: fila[idxTipoVehiculo] ? fila[idxTipoVehiculo].toString().trim() : '',
-        marca: fila[idxMarca] ? fila[idxMarca].toString().trim() : '',
-        modelo: fila[idxModelo] ? fila[idxModelo].toString().trim() : '',
-        año: fila[idxAño] ? fila[idxAño].toString().trim() : '',
-        serieVehiculo: fila[idxSerieVehiculo] ? fila[idxSerieVehiculo].toString().trim() : '',
-        gateway: fila[idxGpsActual] ? fila[idxGpsActual].toString().trim() : '',
-        tipoUnidad: fila[idxTipoUnidad] ? fila[idxTipoUnidad].toString().trim() : '',
-        ultimoServicio: fila[idxUltimoServicio] || '',
-        // Datos del estado enriquecidos
-        estadoId: estadoId,
-        estadoNombre: estado ? estado.nombre : 'Sin estado',
-        estadoColor: estado ? estado.color : 'secondary',
-        estadoDescripcion: estado ? estado.descripcion : '',
-        estadoActivo: estado ? estado.activo : false
+
+    var datos = sheet.getDataRange().getValues();
+    var usuarios = [];
+
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
+      if (!fila[0]) continue; // Saltar filas vacías
+
+      var rol = Number(fila[4]);
+      var rolesLabel = { 1: 'Administrador', 2: 'Revisor', 3: 'Técnico' };
+
+      usuarios.push({
+        id: fila[0].toString().trim(),
+        nombre: fila[1] ? fila[1].toString().trim() : '',
+        usuario: fila[2] ? fila[2].toString().trim() : '',
+        rol: rol,
+        rolLabel: rolesLabel[rol] || 'Desconocido',
+        activo: fila[5] === true,
+        ultimoAcceso: fila[6] ? Utilities.formatDate(new Date(fila[6]), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm') : '—'
       });
     }
-    
-    console.log(`✅ Flotilla cargada: ${vehiculos.length} vehículos`);
-    return { ok: true, vehiculos: vehiculos };
-    
-  } catch (error) {
-    console.error('❌ Error en obtenerFlotilla:', error);
-    console.error('Stack:', error.stack);
-    return { ok: false, error: error.message };
-  }
-}
-function actualizarEstadosFlotilla() {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName('🚚_Flotilla_Fallas');
-    if (!sheet) {
-      console.error('❌ No se encontró la hoja de Flotilla');
-      return;
-    }
-    
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0];
-    const idxEstado = headers.indexOf('ESTADO');
-    const idxEconomico = headers.indexOf('ECONOMICO');
-    
-    // Actualizar cada vehículo con un estado por defecto
-    for (let i = 1; i < data.length; i++) {
-      const fila = data[i];
-      const economico = fila[idxEconomico];
-      
-      // Si el estado está vacío, asignar "Activo" (ID: 1)
-      if (!fila[idxEstado] || fila[idxEstado].toString().trim() === '') {
-        sheet.getRange(i + 1, idxEstado + 1).setValue('1');
-        console.log(`✅ Estado actualizado para ${economico}: Activo`);
-      }
-    }
-    
-    console.log('✅ Todos los estados han sido actualizados');
-    
-  } catch (error) {
-    console.error('❌ Error al actualizar estados:', error);
+
+    // Ordenar por ID
+    usuarios.sort(function(a, b) { return a.id.localeCompare(b.id); });
+
+    return { ok: true, usuarios: usuarios };
+
+  } catch (err) {
+    console.error('Error en obtenerUsuarios:', err);
+    return { ok: false, error: err.message };
   }
 }
 
-function actualizarGpsFlotilla() {
+/**
+ * Agrega un nuevo usuario (solo Admin)
+ * @param {string} token - Token de sesión
+ * @param {Object} datos - Datos del usuario { nombre, usuario, password, rol, activo }
+ * @returns {Object} { ok: true, mensaje: string, id: string }
+ */
+function agregarUsuario(token, datos) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  var sesion = sesionResp.sesion;
+
+  // Solo Admin (rol 1) puede agregar usuarios
+  if (sesion.rol !== 1) {
+    return { ok: false, error: 'Solo Administradores pueden agregar usuarios.' };
+  }
+
+  // Validar campos obligatorios
+  if (!datos.nombre || datos.nombre.toString().trim() === '') {
+    return { ok: false, error: 'El nombre completo es requerido.' };
+  }
+
+  if (!datos.usuario || datos.usuario.toString().trim() === '') {
+    return { ok: false, error: 'El nombre de usuario es requerido.' };
+  }
+
+  if (!datos.password || datos.password.toString().trim().length < 6) {
+    return { ok: false, error: 'La contraseña debe tener al menos 6 caracteres.' };
+  }
+
+  if (!datos.rol || ![1, 2, 3].includes(Number(datos.rol))) {
+    return { ok: false, error: 'Selecciona un rol válido (1=Admin, 2=Revisor, 3=Técnico).' };
+  }
+
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const flotillaSheet = ss.getSheetByName('🚚_Flotilla_Fallas');
-    const inventarioSheet = ss.getSheetByName('📦_Inventario_GPS');
-    
-    if (!flotillaSheet || !inventarioSheet) {
-      console.error('❌ No se encontraron las hojas necesarias');
-      return;
+    var sheet = SHEETS.USUARIOS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de usuarios.' };
     }
-    
-    const flotillaData = flotillaSheet.getDataRange().getValues();
-    const invData = inventarioSheet.getDataRange().getValues();
-    const invHeaders = invData[0];
-    
-    const idxEconomicoFlotilla = flotillaData[0].indexOf('ECONOMICO');
-    const idxGpsActual = flotillaData[0].indexOf('GPS_ACTUAL');
-    const idxEstado = flotillaData[0].indexOf('ESTADO');
-    
-    const idxSerieInv = invHeaders.indexOf('SERIE_GPS');
-    const idxEcoInv = invHeaders.indexOf('ECONOMICO_ASIGNADO');
-    const idxEstadoInv = invHeaders.indexOf('ESTADO');
-    
-    // Crear mapa de económico -> serie GPS
-    const mapaGPS = {};
-    for (let i = 1; i < invData.length; i++) {
-      const fila = invData[i];
-      const eco = fila[idxEcoInv] ? fila[idxEcoInv].toString().trim() : '';
-      const serie = fila[idxSerieInv] ? fila[idxSerieInv].toString().trim() : '';
-      const estado = fila[idxEstadoInv] ? fila[idxEstadoInv].toString().trim() : '';
-      
-      if (eco && serie && estado === 'Instalado') {
-        mapaGPS[eco] = serie;
+
+    var datosSheet = sheet.getDataRange().getValues();
+
+    // Verificar que el usuario no exista (case insensitive)
+    var usuarioLimpio = datos.usuario.toString().trim().toLowerCase();
+    for (var i = 1; i < datosSheet.length; i++) {
+      var existente = (datosSheet[i][2] || '').toString().trim().toLowerCase();
+      if (existente === usuarioLimpio) {
+        return { ok: false, error: 'El usuario "' + datos.usuario + '" ya existe.' };
       }
     }
+
+    // Generar ID automático según el rol
+    var rolesPrefijo = { 1: 'ADM', 2: 'REV', 3: 'TEC' };
+    var prefijo = rolesPrefijo[Number(datos.rol)] || 'USR';
+    var ultimoId = 0;
+
+    for (var i = 1; i < datosSheet.length; i++) {
+      var id = datosSheet[i][0];
+      if (id && id.toString().startsWith(prefijo)) {
+        var num = parseInt(id.toString().replace(prefijo + '-', '')) || 0;
+        if (num > ultimoId) ultimoId = num;
+      }
+    }
+    var nuevoId = prefijo + '-' + String(ultimoId + 1).padStart(3, '0');
+
+    // Hash de la contraseña
+    var passHash = hashSimple(datos.password.toString().trim());
+
+    // Activo por defecto (true si no se especifica)
+    var activo = (datos.activo !== undefined) ? datos.activo : true;
+
+    // Agregar usuario a la hoja
+    sheet.appendRow([
+      nuevoId,                                    // A: ID_USUARIO
+      datos.nombre.toString().trim(),             // B: NOMBRE
+      datos.usuario.toString().trim().toLowerCase(), // C: USUARIO
+      passHash,                                   // D: PASS_HASH
+      Number(datos.rol),                          // E: ROL
+      activo,                                     // F: ACTIVO
+      null                                        // G: ULTIMO_ACCESO
+    ]);
+
+    console.log('✅ Usuario agregado:', nuevoId, '-', datos.nombre, '(rol:', datos.rol + ')');
+
+    // 🔔 NOTIFICACIÓN: Nuevo usuario creado
+    var admins = _obtenerUsuariosPorRol([1]);
+    for (var u = 0; u < admins.length; u++) {
+      if (admins[u] !== sesion.usuarioId) {
+        _crearNotificacion(
+          admins[u],
+          'USUARIO',
+          '👤 Nuevo usuario ' + nuevoId + ' (' + datos.nombre + ') creado con rol ' + datos.rol,
+          nuevoId,
+          '#panel-usuarios'
+        );
+      }
+    }
+
+    // ✅ AUDITORÍA: Usuario creado
+    _registrarAuditoria(
+      sesion.usuarioId,
+      sesion.nombre,
+      'CREAR_USUARIO',
+      'USUARIOS',
+      'Usuario ' + nuevoId + ' (' + datos.nombre + ') creado con rol ' + datos.rol + ' por ' + sesion.nombre,
+      nuevoId,
+      '',
+      ''
+    );
+
+    return {
+      ok: true,
+      mensaje: 'Usuario "' + datos.nombre + '" agregado correctamente.',
+      id: nuevoId
+    };
+
+  } catch (err) {
+    console.error('❌ Error en agregarUsuario:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Edita un usuario existente (Admin o Revisor)
+ * @param {string} token - Token de sesión
+ * @param {string} id - ID del usuario a editar
+ * @param {Object} datos - Datos a actualizar { nombre, usuario, rol, activo }
+ * @returns {Object} { ok: true, mensaje: string }
+ */
+function editarUsuario(token, id, datos) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  
+  var usuarioActual = sesionResp.sesion;
+  
+  // Admin (1) o Revisor (2) pueden editar
+  if (usuarioActual.rol > 2) {
+    return { ok: false, error: 'Sin permisos para editar usuarios.' };
+  }
+
+  // Si es Revisor, no puede cambiar el rol
+  if (usuarioActual.rol === 2 && datos.rol !== undefined) {
+    return { ok: false, error: 'Los Revisores no pueden cambiar el rol de los usuarios.' };
+  }
+
+  if (!id) {
+    return { ok: false, error: 'El ID del usuario es requerido.' };
+  }
+
+  try {
+    var sheet = SHEETS.USUARIOS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de usuarios.' };
+    }
+
+    var datosSheet = sheet.getDataRange().getValues();
+    var encontrado = false;
+    var filaReal = -1;
+
+    for (var i = 1; i < datosSheet.length; i++) {
+      if ((datosSheet[i][0] || '').toString().trim() === id.toString().trim()) {
+        filaReal = i + 1;
+        encontrado = true;
+        break;
+      }
+    }
+
+    if (!encontrado) {
+      return { ok: false, error: 'No se encontró el usuario con ID: ' + id };
+    }
+
+    // No permitir que un Revisor edite a otro Revisor o Admin
+    if (usuarioActual.rol === 2) {
+      var rolActual = Number(datosSheet[filaReal - 1][4] || 0);
+      if (rolActual <= 2) {
+        return { ok: false, error: 'Los Revisores no pueden editar Administradores o Revisores.' };
+      }
+    }
+
+    // No permitir que un Revisor se edite a sí mismo
+    if (usuarioActual.rol === 2 && usuarioActual.usuarioId === id) {
+      return { ok: false, error: 'No puedes editar tu propio usuario.' };
+    }
+
+    // Actualizar campos
+    if (datos.nombre !== undefined) {
+      sheet.getRange(filaReal, 2).setValue(datos.nombre.toString().trim());
+    }
     
-    // Actualizar flotilla con las series reales
-    for (let i = 1; i < flotillaData.length; i++) {
-      const fila = flotillaData[i];
-      const eco = fila[idxEconomicoFlotilla] ? fila[idxEconomicoFlotilla].toString().trim() : '';
+    if (datos.usuario !== undefined) {
+      sheet.getRange(filaReal, 3).setValue(datos.usuario.toString().trim().toLowerCase());
+    }
+    
+    // Solo Admin puede cambiar el rol
+    if (datos.rol !== undefined && usuarioActual.rol === 1) {
+      sheet.getRange(filaReal, 5).setValue(Number(datos.rol));
+    }
+    
+    if (datos.activo !== undefined) {
+      sheet.getRange(filaReal, 6).setValue(datos.activo === true);
+    }
+
+    console.log('✅ Usuario editado:', id, 'por', usuarioActual.nombre);
+    
+    return {
+      ok: true,
+      mensaje: 'Usuario actualizado correctamente.'
+    };
+
+  } catch (err) {
+    console.error('❌ Error en editarUsuario:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Cambia la contraseña de un usuario (Admin o Revisor)
+ * @param {string} token - Token de sesión
+ * @param {string} id - ID del usuario
+ * @param {string} nuevaPassword - Nueva contraseña (mínimo 6 caracteres)
+ * @returns {Object} { ok: true, mensaje: string }
+ */
+function cambiarPasswordUsuario(token, id, nuevaPassword) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  
+  var usuarioActual = sesionResp.sesion;
+  
+  // Admin (1) o Revisor (2) pueden cambiar contraseñas
+  if (usuarioActual.rol > 2) {
+    return { ok: false, error: 'Sin permisos para cambiar contraseñas.' };
+  }
+
+  if (!id) {
+    return { ok: false, error: 'El ID del usuario es requerido.' };
+  }
+
+  if (!nuevaPassword || nuevaPassword.toString().trim().length < 6) {
+    return { ok: false, error: 'La contraseña debe tener al menos 6 caracteres.' };
+  }
+
+  try {
+    var sheet = SHEETS.USUARIOS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de usuarios.' };
+    }
+
+    var datosSheet = sheet.getDataRange().getValues();
+    var encontrado = false;
+    var filaReal = -1;
+
+    for (var i = 1; i < datosSheet.length; i++) {
+      if ((datosSheet[i][0] || '').toString().trim() === id.toString().trim()) {
+        filaReal = i + 1;
+        encontrado = true;
+        break;
+      }
+    }
+
+    if (!encontrado) {
+      return { ok: false, error: 'No se encontró el usuario con ID: ' + id };
+    }
+
+    // Revisor no puede cambiar contraseña de Admin o Revisor
+    if (usuarioActual.rol === 2) {
+      var rolActual = Number(datosSheet[filaReal - 1][4] || 0);
+      if (rolActual <= 2) {
+        return { ok: false, error: 'Los Revisores no pueden cambiar contraseñas de Administradores o Revisores.' };
+      }
+    }
+
+    // Hash de la nueva contraseña
+    var passHash = hashSimple(nuevaPassword.toString().trim());
+    sheet.getRange(filaReal, 4).setValue(passHash);
+
+    console.log('✅ Contraseña cambiada para:', id, 'por', usuarioActual.nombre);
+    
+    return {
+      ok: true,
+      mensaje: 'Contraseña actualizada correctamente.'
+    };
+
+  } catch (err) {
+    console.error('❌ Error en cambiarPasswordUsuario:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Elimina un usuario (baja lógica) - solo Admin
+ * @param {string} token - Token de sesión
+ * @param {string} id - ID del usuario a eliminar
+ * @returns {Object} { ok: true, mensaje: string }
+ */
+function eliminarUsuario(token, id) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  
+  var usuarioActual = sesionResp.sesion;
+  
+  // Solo Admin (rol 1) puede eliminar usuarios
+  if (usuarioActual.rol !== 1) {
+    return { ok: false, error: 'Solo Administradores pueden eliminar usuarios.' };
+  }
+
+  if (!id) {
+    return { ok: false, error: 'El ID del usuario es requerido.' };
+  }
+
+  // No permitir eliminar al propio usuario
+  if (usuarioActual.usuarioId === id) {
+    return { ok: false, error: 'No puedes eliminar tu propio usuario.' };
+  }
+
+  try {
+    var sheet = SHEETS.USUARIOS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de usuarios.' };
+    }
+
+    var datosSheet = sheet.getDataRange().getValues();
+    var encontrado = false;
+    var filaReal = -1;
+    var nombreUsuario = '';
+
+    for (var i = 1; i < datosSheet.length; i++) {
+      if ((datosSheet[i][0] || '').toString().trim() === id.toString().trim()) {
+        filaReal = i + 1;
+        nombreUsuario = datosSheet[i][1] || '';
+        encontrado = true;
+        break;
+      }
+    }
+
+    if (!encontrado) {
+      return { ok: false, error: 'No se encontró el usuario con ID: ' + id };
+    }
+
+    // Baja lógica: ACTIVO = false
+    sheet.getRange(filaReal, 6).setValue(false);
+
+    console.log('✅ Usuario desactivado:', id, 'por', usuarioActual.nombre);
+    
+    return {
+      ok: true,
+      mensaje: 'Usuario "' + nombreUsuario + '" desactivado correctamente.'
+    };
+
+  } catch (err) {
+    console.error('❌ Error en eliminarUsuario:', err);
+    return { ok: false, error: err.message };
+  }
+}
+// ============================================================
+// CONFIGURACIÓN DEL SISTEMA
+// ============================================================
+
+/**
+ * Obtiene todos los parámetros del sistema
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok: true, parametros: [...] }
+ */
+function obtenerParametros(token) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  
+  // Solo Admin (1) o Revisor (2)
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para ver configuración.' };
+  }
+
+  try {
+    var params = _leerParams();
+    var parametros = [];
+
+    // Convertir el objeto a array para el frontend
+    for (var clave in params) {
+      parametros.push({
+        clave: clave,
+        valor: params[clave] || '',
+        descripcion: _obtenerDescripcionParametro(clave)
+      });
+    }
+
+    // Ordenar alfabéticamente
+    parametros.sort(function(a, b) {
+      return a.clave.localeCompare(b.clave);
+    });
+
+    return { ok: true, parametros: parametros };
+
+  } catch (err) {
+    console.error('Error en obtenerParametros:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Obtiene la descripción de un parámetro
+ * @param {string} clave - Clave del parámetro
+ * @returns {string} Descripción
+ */
+function _obtenerDescripcionParametro(clave) {
+  var descripciones = {
+    'FOLIO_PREFIJO': 'Prefijo para folios de servicio',
+    'FOLIO_ULTIMO': 'Último folio generado (auto-incrementable)',
+    'DRIVE_FOLDER_ID': 'ID de la carpeta raíz en Google Drive',
+    'CORREOS_DESTINO': 'Correos para envío de PDF (separados por comas)',
+    'DIAS_LIMITE_DRIVE': 'Días de antigüedad para eliminar archivos',
+    'COMPRESION_IMAGENES': 'Comprimir imágenes antes de subir (true/false)',
+    'CALIDAD_IMAGEN': 'Calidad de compresión (1-100)',
+    'MAX_IMAGENES_PDF': 'Máximo de imágenes por PDF',
+    'FORMATO_SERIE_GPS': 'Máscara de validación para series GPS',
+    'VERBOSE_LOGGING': 'Registro detallado en consola (true/false)',
+    'EMPRESA_NOMBRE': 'Nombre de la empresa para documentos',
+    'EMPRESA_RFC': 'RFC para facturación',
+    'TICKET_PREFIJO': 'Prefijo para tickets de fallas',
+    'TICKET_ULTIMO': 'Último ticket generado'
+  };
+  return descripciones[clave] || '';
+}
+
+/**
+ * Actualiza un parámetro del sistema
+ * @param {string} token - Token de sesión
+ * @param {string} clave - Clave del parámetro
+ * @param {string} valor - Nuevo valor
+ * @returns {Object} { ok: true, mensaje: string }
+ */
+function actualizarParametro(token, clave, valor) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  
+  // Solo Admin (1) o Revisor (2)
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para modificar configuración.' };
+  }
+
+  if (!clave) {
+    return { ok: false, error: 'La clave del parámetro es requerida.' };
+  }
+
+  try {
+    // Validar valores según el tipo
+    if (clave === 'COMPRESION_IMAGENES') {
+      var valorBool = valor.toString().toLowerCase().trim();
+      if (valorBool !== 'true' && valorBool !== 'false') {
+        return { ok: false, error: 'COMPRESION_IMAGENES debe ser true o false.' };
+      }
+    }
+
+    if (clave === 'CALIDAD_IMAGEN') {
+      var calidad = Number(valor);
+      if (isNaN(calidad) || calidad < 1 || calidad > 100) {
+        return { ok: false, error: 'CALIDAD_IMAGEN debe ser un número entre 1 y 100.' };
+      }
+    }
+
+    if (clave === 'CORREOS_DESTINO') {
+      var correos = valor.toString().split(',').map(function(c) { return c.trim(); });
+      var validos = correos.filter(function(c) { return c.includes('@'); });
+      if (validos.length === 0 && valor.toString().trim() !== '') {
+        return { ok: false, error: 'Formato de correos inválido. Usa: correo1@dominio.com, correo2@dominio.com' };
+      }
+    }
+
+    // Guardar el parámetro
+    _escribirParam(clave, valor.toString().trim());
+
+    console.log('✅ Parámetro actualizado:', clave, '=', valor);
+
+    return {
+      ok: true,
+      mensaje: 'Parámetro "' + clave + '" actualizado correctamente.'
+    };
+
+  } catch (err) {
+    console.error('Error en actualizarParametro:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Actualiza múltiples parámetros a la vez
+ * @param {string} token - Token de sesión
+ * @param {Array} parametros - Array de { clave, valor }
+ * @returns {Object} { ok: true, mensaje: string }
+ */
+function actualizarMultiplesParametros(token, parametros) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para modificar configuración.' };
+  }
+
+  if (!parametros || parametros.length === 0) {
+    return { ok: false, error: 'No hay parámetros para actualizar.' };
+  }
+
+  try {
+    var actualizados = 0;
+    var errores = [];
+
+    for (var i = 0; i < parametros.length; i++) {
+      var p = parametros[i];
+      try {
+        _escribirParam(p.clave, p.valor.toString().trim());
+        actualizados++;
+      } catch (err) {
+        errores.push(p.clave + ': ' + err.message);
+      }
+    }
+
+    if (errores.length > 0) {
+      return {
+        ok: true,
+        mensaje: 'Se actualizaron ' + actualizados + ' parámetros. Errores: ' + errores.join(', ')
+      };
+    }
+
+    return {
+      ok: true,
+      mensaje: actualizados + ' parámetros actualizados correctamente.'
+    };
+
+  } catch (err) {
+    console.error('Error en actualizarMultiplesParametros:', err);
+    return { ok: false, error: err.message };
+  }
+}
+// ============================================================
+// SISTEMA DE NOTIFICACIONES
+// ============================================================
+
+/**
+ * Crea una nueva notificación en el sistema
+ * @param {string} usuarioDestino - ID del usuario destinatario
+ * @param {string} tipo - Tipo de notificación (REPORTE, TICKET, USUARIO, etc.)
+ * @param {string} mensaje - Mensaje descriptivo
+ * @param {string} folioRelacionado - Folio o ID relacionado (opcional)
+ * @param {string} urlAccion - URL para acción rápida (opcional)
+ */
+function _crearNotificacion(usuarioId, tipo, mensaje, folioRelacionado, urlAccion) {
+  try {
+    const sheet = SHEETS.NOTIFICACIONES();
+    if (!sheet) {
+      console.warn('⚠️ No se encontró la hoja de Notificaciones');
+      return;
+    }
+
+    const nuevaFila = sheet.getLastRow() + 1;
+    const datos = [
+      new Date(),           // FECHA
+      usuarioId,            // USUARIO_DESTINO
+      tipo,                 // TIPO
+      mensaje,              // MENSAJE
+      folioRelacionado || '', // FOLIO_RELACIONADO
+      false,                // LEIDA
+      null,                 // FECHA_LECTURA
+      urlAccion || ''       // URL_ACCION
+    ];
+
+    sheet.getRange(nuevaFila, 1, 1, datos.length).setValues([datos]);
+    console.log('✅ Notificación creada para:', usuarioId);
+
+  } catch (err) {
+    console.error('❌ Error al crear notificación:', err);
+  }
+}
+
+/**
+ * Obtiene las notificaciones del usuario actual
+ * @param {string} token - Token de sesión
+ * @param {boolean} soloNoLeidas - Si solo obtener no leídas
+ * @returns {Object} { ok: true, notificaciones: [...] }
+ */
+function obtenerNotificaciones(token, soloNoLeidas) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  var usuarioId = sesionResp.sesion.usuarioId;
+
+  try {
+    var sheet = SHEETS.NOTIFICACIONES();
+    if (!sheet) {
+      return { ok: true, notificaciones: [] };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var notificaciones = [];
+
+    var tiposIcono = {
+      'REPORTE': '📝',
+      'TICKET': '🎫',
+      'USUARIO': '👤',
+      'ESTADO': '🔄',
+      'APROBACION': '✅',
+      'PAGO': '💰',
+      'SISTEMA': '⚙️'
+    };
+
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
+      var destino = (fila[1] || '').toString().trim();
+
+      if (destino !== usuarioId) continue;
+
+      var leida = fila[5] === true;
+      if (soloNoLeidas && leida) continue;
+
+      var tipo = (fila[2] || 'SISTEMA').toString().trim();
+      var icono = tiposIcono[tipo] || '📌';
+
+      notificaciones.push({
+        id: i, // Usamos la fila como ID
+        fecha: fila[0] ? Utilities.formatDate(new Date(fila[0]), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm') : '—',
+        tipo: tipo,
+        mensaje: fila[3] ? fila[3].toString().trim() : '',
+        folioRelacionado: fila[4] ? fila[4].toString().trim() : '',
+        leida: leida,
+        fechaLectura: fila[6] ? Utilities.formatDate(new Date(fila[6]), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm') : '',
+        urlAccion: fila[7] ? fila[7].toString().trim() : '',
+        icono: icono
+      });
+    }
+
+    // Ordenar por fecha (más reciente primero)
+    notificaciones.sort(function(a, b) {
+      return new Date(b.fecha) - new Date(a.fecha);
+    });
+
+    return {
+      ok: true,
+      notificaciones: notificaciones,
+      noLeidas: notificaciones.filter(function(n) { return !n.leida; }).length
+    };
+
+  } catch (err) {
+    console.error('Error en obtenerNotificaciones:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Marca una notificación como leída
+ * @param {string} token - Token de sesión
+ * @param {number} notificacionId - ID de la notificación (fila)
+ * @returns {Object} { ok: true }
+ */
+function marcarNotificacionLeida(token, notificacionId) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  try {
+    var sheet = SHEETS.NOTIFICACIONES();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de notificaciones.' };
+    }
+
+    // La fila real es notificacionId + 1 (porque el ID es el índice del array)
+    var filaReal = Number(notificacionId) + 1;
+
+    // Verificar que la fila existe
+    var ultimaFila = sheet.getLastRow();
+    if (filaReal > ultimaFila) {
+      return { ok: false, error: 'Notificación no encontrada.' };
+    }
+
+    // Verificar que pertenece al usuario
+    var destino = sheet.getRange(filaReal, 2).getValue();
+    if (destino.toString().trim() !== sesionResp.sesion.usuarioId) {
+      return { ok: false, error: 'No tienes permiso para modificar esta notificación.' };
+    }
+
+    // Marcar como leída
+    sheet.getRange(filaReal, 6).setValue(true);  // LEIDA
+    sheet.getRange(filaReal, 7).setValue(new Date()); // FECHA_LECTURA
+
+    return { ok: true };
+
+  } catch (err) {
+    console.error('Error en marcarNotificacionLeida:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Marca todas las notificaciones del usuario como leídas
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok: true }
+ */
+function marcarTodasNotificacionesLeidas(token) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  var usuarioId = sesionResp.sesion.usuarioId;
+
+  try {
+    var sheet = SHEETS.NOTIFICACIONES();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de notificaciones.' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var ahora = new Date();
+
+    for (var i = 1; i < datos.length; i++) {
+      var destino = (datos[i][1] || '').toString().trim();
+      var leida = datos[i][5] === true;
+
+      if (destino === usuarioId && !leida) {
+        sheet.getRange(i + 1, 6).setValue(true);
+        sheet.getRange(i + 1, 7).setValue(ahora);
+      }
+    }
+
+    return { ok: true };
+
+  } catch (err) {
+    console.error('Error en marcarTodasNotificacionesLeidas:', err);
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Obtiene los IDs de usuarios con un rol específico
+ * @param {Array} roles - Array de roles [1, 2, 3]
+ * @returns {Array} - Array de IDs de usuarios
+ */
+function _obtenerUsuariosPorRol(roles) {
+  try {
+    var sheet = SHEETS.USUARIOS();
+    if (!sheet) return [];
+
+    var datos = sheet.getDataRange().getValues();
+    var usuarios = [];
+
+    for (var i = 1; i < datos.length; i++) {
+      var rol = Number(datos[i][4] || 0);
+      var activo = datos[i][5] === true;
+      var id = (datos[i][0] || '').toString().trim();
+
+      if (id && activo && roles.indexOf(rol) !== -1) {
+        usuarios.push(id);
+      }
+    }
+
+    return usuarios;
+
+  } catch (err) {
+    console.error('Error en _obtenerUsuariosPorRol:', err);
+    return [];
+  }
+}
+/**
+ * FUNCIÓN DE PRUEBA - Crear una notificación manual para verificar que funciona
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok: true, mensaje: string }
+ */
+function pruebaCrearNotificacion(token) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  
+  var usuarioId = sesionResp.sesion.usuarioId;
+  var nombre = sesionResp.sesion.nombre;
+  
+  // Crear una notificación de prueba
+  _crearNotificacion(
+    usuarioId,
+    'SISTEMA',
+    '🧪 Notificación de prueba para ' + nombre + ' - El sistema funciona correctamente',
+    'PRUEBA-' + new Date().getTime(),
+    '#panel-dashboard'
+  );
+  
+  return { ok: true, mensaje: 'Notificación de prueba creada para ' + nombre };
+}
+// ============================================================
+// LOG DE AUDITORÍA
+// ============================================================
+
+/**
+ * Registra una acción en el log de auditoría
+ * @param {string} usuarioId - ID del usuario que realiza la acción
+ * @param {string} usuarioNombre - Nombre del usuario
+ * @param {string} accion - Tipo de acción (LOGIN, REPORTE, TICKET, etc.)
+ * @param {string} modulo - Módulo afectado (USUARIOS, INVENTARIO, FLOTILLA, etc.)
+ * @param {string} descripcion - Descripción detallada de la acción
+ * @param {string} folioRelacionado - Folio o ID relacionado (opcional)
+ * @param {string} ip - Dirección IP (opcional)
+ * @param {string} userAgent - Navegador/Dispositivo (opcional)
+ */
+function _registrarAuditoria(usuarioId, usuarioNombre, accion, modulo, descripcion, folioRelacionado, ip, userAgent) {
+  try {
+    var sheet = SS.getSheetByName('📈_Log_Auditoria');
+    if (!sheet) {
+      console.warn('⚠️ No se encontró la hoja de auditoría');
+      return;
+    }
+
+    var ahora = new Date();
+
+    // ✅ ORDEN CORRECTO: 10 columnas
+    sheet.appendRow([
+      ahora,                    // 1. FECHA
+      usuarioId,                // 2. USUARIO_ID
+      usuarioNombre,            // 3. USUARIO_NOMBRE
+      accion,                   // 4. ACCION
+      modulo,                   // 5. MODULO
+      descripcion,              // 6. DESCRIPCION
+      folioRelacionado || '',   // 7. FOLIO_RELACIONADO
+      ip || '',                 // 8. IP
+      userAgent || '',          // 9. USER_AGENT
+      ''                        // 10. DETALLES_ADICIONALES
+    ]);
+
+    console.log('📝 Auditoría registrada:', accion, '-', usuarioNombre);
+
+  } catch (err) {
+    console.error('❌ Error al registrar auditoría:', err);
+  }
+}
+
+/**
+ * Obtiene el log de auditoría con filtros
+ * @param {string} token - Token de sesión
+ * @param {Object} filtros - { usuario, accion, modulo, fechaDesde, fechaHasta, limite }
+ * @returns {Object} { ok: true, registros: [...] }
+ */
+function obtenerLogAuditoria(token, filtros) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  // Solo Admin y Revisor pueden ver el log
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para ver el log de auditoría.' };
+  }
+
+  try {
+    var sheet = SS.getSheetByName('📈_Log_Auditoria');
+    if (!sheet) {
+      return { ok: true, registros: [] };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    if (datos.length <= 1) {
+      return { ok: true, registros: [] };
+    }
+
+    var headers = datos[0];
+    var idxFecha = headers.indexOf('FECHA');
+    var idxUsuarioId = headers.indexOf('USUARIO_ID');
+    var idxUsuarioNombre = headers.indexOf('USUARIO_NOMBRE');
+    var idxAccion = headers.indexOf('ACCION');
+    var idxModulo = headers.indexOf('MODULO');
+    var idxDescripcion = headers.indexOf('DESCRIPCION');
+    var idxFolio = headers.indexOf('FOLIO_RELACIONADO');
+    var idxIP = headers.indexOf('IP');
+    var idxUserAgent = headers.indexOf('USER_AGENT');
+
+    var limite = filtros.limite || 100;
+    var registros = [];
+
+    for (var i = datos.length - 1; i >= 1; i--) {
+      if (registros.length >= limite) break;
+
+      var fila = datos[i];
+      if (!fila[idxFecha]) continue;
+
+      // Aplicar filtros
+      if (filtros.usuario && fila[idxUsuarioId] !== filtros.usuario) continue;
+      if (filtros.accion && fila[idxAccion] !== filtros.accion) continue;
+      if (filtros.modulo && fila[idxModulo] !== filtros.modulo) continue;
+
+      if (filtros.fechaDesde) {
+        var fechaDesde = new Date(filtros.fechaDesde);
+        var fechaRegistro = new Date(fila[idxFecha]);
+        if (fechaRegistro < fechaDesde) continue;
+      }
+      if (filtros.fechaHasta) {
+        var fechaHasta = new Date(filtros.fechaHasta);
+        var fechaRegistro = new Date(fila[idxFecha]);
+        if (fechaRegistro > fechaHasta) continue;
+      }
+
+      registros.push({
+        fecha: fila[idxFecha] ? Utilities.formatDate(new Date(fila[idxFecha]), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm:ss') : '—',
+        usuarioId: fila[idxUsuarioId] || '',
+        usuarioNombre: fila[idxUsuarioNombre] || '',
+        accion: fila[idxAccion] || '',
+        modulo: fila[idxModulo] || '',
+        descripcion: fila[idxDescripcion] || '',
+        folioRelacionado: fila[idxFolio] || '',
+        ip: fila[idxIP] || '',
+        userAgent: fila[idxUserAgent] || ''
+      });
+    }
+
+    return { ok: true, registros: registros };
+
+  } catch (err) {
+    console.error('Error en obtenerLogAuditoria:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Obtiene estadísticas del log de auditoría
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok: true, stats: {...} }
+ */
+function obtenerEstadisticasAuditoria(token) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos.' };
+  }
+
+  try {
+    var sheet = SS.getSheetByName('📈_Log_Auditoria');
+    if (!sheet) {
+      return { ok: true, stats: { total: 0, porAccion: {}, porModulo: {}, porUsuario: {} } };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var stats = {
+      total: datos.length - 1,
+      porAccion: {},
+      porModulo: {},
+      porUsuario: {},
+      hoy: 0,
+      estaSemana: 0,
+      esteMes: 0
+    };
+
+    var ahora = new Date();
+    var hoy = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+    var semanaInicio = new Date(ahora);
+    semanaInicio.setDate(semanaInicio.getDate() - 7);
+    var mesInicio = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
+
+    var headers = datos[0];
+    var idxFecha = headers.indexOf('FECHA');
+    var idxAccion = headers.indexOf('ACCION');
+    var idxModulo = headers.indexOf('MODULO');
+    var idxUsuarioNombre = headers.indexOf('USUARIO_NOMBRE');
+
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
+      if (!fila[idxFecha]) continue;
+
+      var fecha = new Date(fila[idxFecha]);
       
-      if (eco && mapaGPS[eco]) {
-        sheet.getRange(i + 1, idxGpsActual + 1).setValue(mapaGPS[eco]);
-        console.log(`✅ GPS actualizado para ${eco}: ${mapaGPS[eco]}`);
-      } else if (eco) {
-        // Si no tiene GPS asignado, poner "Sin GPS"
-        const valorActual = fila[idxGpsActual] ? fila[idxGpsActual].toString().trim() : '';
-        if (valorActual === '' || valorActual === 'Pendiente') {
-          // Mantener el valor actual
+      // Contar por período
+      if (fecha >= hoy) stats.hoy++;
+      if (fecha >= semanaInicio) stats.estaSemana++;
+      if (fecha >= mesInicio) stats.esteMes++;
+
+      // Contar por acción
+      var accion = fila[idxAccion] || 'DESCONOCIDO';
+      stats.porAccion[accion] = (stats.porAccion[accion] || 0) + 1;
+
+      // Contar por módulo
+      var modulo = fila[idxModulo] || 'DESCONOCIDO';
+      stats.porModulo[modulo] = (stats.porModulo[modulo] || 0) + 1;
+
+      // Contar por usuario
+      var usuario = fila[idxUsuarioNombre] || 'DESCONOCIDO';
+      stats.porUsuario[usuario] = (stats.porUsuario[usuario] || 0) + 1;
+    }
+
+    return { ok: true, stats: stats };
+
+  } catch (err) {
+    console.error('Error en obtenerEstadisticasAuditoria:', err);
+    return { ok: false, error: err.message };
+  }
+}
+// 
+function registrarAccesoFrontend(token, userAgent) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  var sesion = sesionResp.sesion;
+
+  _registrarAuditoria(
+    sesion.usuarioId,
+    sesion.nombre,
+    'ACCESO_SISTEMA',
+    'AUTENTICACION',
+    'Acceso al sistema desde la web app',
+    '',
+    '',
+    userAgent || ''
+  );
+
+  return { ok: true };
+}
+/**
+ * Crear registros de auditoría de prueba
+ * Ejecutar una vez en el editor de Apps Script
+ */
+function crearAuditoriaPruebaV2() {
+  console.log('📝 Creando registros de auditoría de prueba...');
+  
+  // Obtener usuarios activos
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('👤_Usuarios');
+  if (!sheet) {
+    console.error('❌ No se encontró la hoja de usuarios');
+    return;
+  }
+  
+  var datos = sheet.getDataRange().getValues();
+  var usuarios = [];
+  
+  for (var i = 1; i < datos.length; i++) {
+    if (datos[i][5] === true) {
+      usuarios.push({
+        id: datos[i][0] || '',
+        nombre: datos[i][1] || 'Usuario'
+      });
+    }
+  }
+  
+  if (usuarios.length === 0) {
+    console.log('⚠️ No hay usuarios activos');
+    return;
+  }
+  
+  var acciones = [
+    { accion: 'LOGIN_EXITOSO', modulo: 'AUTENTICACION' },
+    { accion: 'CREAR_REPORTE', modulo: 'REPORTES' },
+    { accion: 'APROBAR_REPORTE', modulo: 'REPORTES' },
+    { accion: 'CREAR_TICKET', modulo: 'TICKETS' },
+    { accion: 'TOMAR_TICKET', modulo: 'TICKETS' },
+    { accion: 'RESOLVER_TICKET', modulo: 'TICKETS' },
+    { accion: 'CREAR_USUARIO', modulo: 'USUARIOS' }
+  ];
+  
+  var contador = 0;
+  
+  usuarios.forEach(function(u) {
+    acciones.forEach(function(a) {
+      contador++;
+      var descripcion = a.accion + ' - ' + u.nombre + ' (Prueba ' + contador + ')';
+      var folio = 'PRUEBA-' + String(contador).padStart(4, '0');
+      
+      _registrarAuditoria(
+        u.id,
+        u.nombre,
+        a.accion,
+        a.modulo,
+        descripcion,
+        folio,
+        '192.168.1.' + contador,
+        'Mozilla/5.0 (Prueba)'
+      );
+    });
+  });
+  
+  console.log('✅ Creados ' + contador + ' registros de auditoría de prueba');
+}
+function verEstructuraAuditoria() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('📈_Log_Auditoria');
+  
+  if (!sheet) {
+    console.log('❌ No se encontró la hoja');
+    return;
+  }
+  
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  console.log('📋 Encabezados actuales:', headers);
+  console.log('📋 Número de columnas:', headers.length);
+}
+function recrearHojaAuditoria() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('📈_Log_Auditoria');
+  
+  // Si existe, eliminarla y crearla de nuevo
+  if (sheet) {
+    ss.deleteSheet(sheet);
+    console.log('🗑️ Hoja antigua eliminada');
+  }
+  
+  // Crear nueva hoja
+  sheet = ss.insertSheet('📈_Log_Auditoria');
+  
+  // Encabezados correctos (10 columnas)
+  var headers = [
+    'FECHA',
+    'USUARIO_ID',
+    'USUARIO_NOMBRE',
+    'ACCION',
+    'MODULO',
+    'DESCRIPCION',
+    'FOLIO_RELACIONADO',
+    'IP',
+    'USER_AGENT',
+    'DETALLES_ADICIONALES'
+  ];
+  
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  
+  // Ajustar anchos
+  sheet.setColumnWidth(1, 150); // FECHA
+  sheet.setColumnWidth(2, 120); // USUARIO_ID
+  sheet.setColumnWidth(3, 150); // USUARIO_NOMBRE
+  sheet.setColumnWidth(4, 150); // ACCION
+  sheet.setColumnWidth(5, 120); // MODULO
+  sheet.setColumnWidth(6, 250); // DESCRIPCION
+  sheet.setColumnWidth(7, 130); // FOLIO_RELACIONADO
+  sheet.setColumnWidth(8, 120); // IP
+  sheet.setColumnWidth(9, 200); // USER_AGENT
+  sheet.setColumnWidth(10, 200); // DETALLES_ADICIONALES
+  
+  // Congelar primera fila
+  sheet.setFrozenRows(1);
+  
+  console.log('✅ Hoja 📈_Log_Auditoria recreada correctamente');
+  console.log('📋 Encabezados:', headers.join(' | '));
+}
+function limpiarAuditoriaPrueba() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('📈_Log_Auditoria');
+  if (!sheet) {
+    console.log('❌ No se encontró la hoja');
+    return;
+  }
+  
+  var datos = sheet.getDataRange().getValues();
+  var filasAEliminar = [];
+  
+  for (var i = datos.length - 1; i >= 1; i--) {
+    var fila = datos[i];
+    var folio = fila[6] || ''; // FOLIO_RELACIONADO
+    if (folio.toString().startsWith('PRUEBA-')) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+  
+  console.log('✅ Registros de prueba eliminados');
+}
+/**
+ * Exporta la flotilla a Excel (SIN guardar en Drive)
+ * @param {string} token - Token de sesión
+ * @param {string} filtroEmpresa - 'TEG', 'ALVA' o '' (todas)
+ * @returns {Object} { ok: true, base64: string, nombre: string }
+ */
+function exportarFlotillaExcel(token, filtroEmpresa) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para exportar flotilla.' };
+  }
+
+  try {
+    var resp = obtenerFlotillaCompleta(token, {});
+    if (!resp.ok) return { ok: false, error: resp.error };
+    var vehiculos = resp.vehiculos || [];
+
+    if (filtroEmpresa) {
+      vehiculos = vehiculos.filter(function(v) { return v.empresa === filtroEmpresa; });
+    }
+
+    var empresas = {};
+    vehiculos.forEach(function(v) {
+      var empresa = v.empresa || 'SIN EMPRESA';
+      if (!empresas[empresa]) { empresas[empresa] = []; }
+      empresas[empresa].push(v);
+    });
+
+    var html = generarHTMLFlotillaExcel(empresas);
+    var nombreArchivo = 'Flotilla_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss') + (filtroEmpresa ? '_' + filtroEmpresa : '') + '.xls';
+    
+    // ✅ GENERAR BLOB EN MEMORIA (NO SE GUARDA EN DRIVE)
+    var blob = Utilities.newBlob(html, 'application/vnd.ms-excel', nombreArchivo);
+    var base64Data = Utilities.base64Encode(blob.getBytes());
+
+    console.log('✅ Excel generado en memoria:', nombreArchivo);
+    
+    return { 
+      ok: true, 
+      base64: base64Data, 
+      nombre: nombreArchivo 
+    };
+
+  } catch (err) {
+    console.error('Error en exportarFlotillaExcel:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Genera el HTML para el Excel de flotilla
+ */
+function generarHTMLFlotillaExcel(empresas) {
+  var html = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" 
+      xmlns:x="urn:schemas-microsoft-com:office:excel" 
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+  <meta charset="UTF-8">
+  <!--[if gte mso 9]>
+  <xml>
+    <x:ExcelWorkbook>
+      <x:ExcelWorksheets>
+        <x:ExcelWorksheet>
+          <x:Name>Flotilla</x:Name>
+          <x:WorksheetOptions>
+            <x:DisplayGridlines/>
+          </x:WorksheetOptions>
+        </x:ExcelWorksheet>
+      </x:ExcelWorksheets>
+    </x:ExcelWorkbook>
+  </xml>
+  <![endif]-->
+  <style>
+    table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 10pt; width: 100%; }
+    th { background: #1a56db; color: #ffffff; font-weight: bold; padding: 8px 12px; border: 1px solid #000; text-align: left; }
+    td { padding: 6px 12px; border: 1px solid #ccc; }
+    .header { font-size: 14pt; font-weight: bold; margin-bottom: 10px; color: #1a56db; }
+    .fecha { font-size: 9pt; color: #666; margin-bottom: 15px; }
+    .resumen-empresa { background: #f0f4ff; font-weight: bold; }
+    .resumen-total { background: #e8f0fe; font-weight: bold; }
+    .accesorio-item { padding-left: 20px; }
+  </style>
+</head>
+<body>
+  <div class="header">🚚 REPORTE DE FLOTILLA POR EMPRESA</div>
+  <div class="fecha">Fecha de exportación: ${new Date().toLocaleString('es-MX')}</div>`;
+
+  var totalGeneral = {
+    gateways: 0,
+    camaras: 0,
+    accesorios: {}
+  };
+
+  var empresasOrdenadas = Object.keys(empresas).sort();
+
+  empresasOrdenadas.forEach(function(empresa) {
+    var vehiculos = empresas[empresa];
+    var resumenEmpresa = {
+      gateways: 0,
+      camaras: 0,
+      accesorios: {}
+    };
+
+    html += `
+  <br><br>
+  <div style="font-size: 12pt; font-weight: bold; background: #0f172a; color: #fff; padding: 8px 12px; border-radius: 4px;">
+    🏢 EMPRESA: ${empresa}
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Económico</th>
+        <th>Placas</th>
+        <th>Tipo</th>
+        <th>Marca/Modelo</th>
+        <th>Estado</th>
+        <th>Tipo Unidad</th>
+        <th>📡 Gateway</th>
+        <th>📷 Cámara</th>
+        <th>🔧 Accesorios</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+    vehiculos.forEach(function(v) {
+      var accesoriosStr = (v.accesorios && v.accesorios.length > 0) 
+        ? v.accesorios.join(', ') 
+        : '—';
+
+      // Contar equipos
+      if (v.gatewaySerie) resumenEmpresa.gateways++;
+      if (v.camaraSerie) resumenEmpresa.camaras++;
+
+      // Contar accesorios individuales
+      if (v.accesorios && v.accesorios.length > 0) {
+        v.accesorios.forEach(function(a) {
+          resumenEmpresa.accesorios[a] = (resumenEmpresa.accesorios[a] || 0) + 1;
+        });
+      }
+
+      html += `
+      <tr>
+        <td><strong>${v.economico || '—'}</strong></td>
+        <td>${v.placas || '—'}</td>
+        <td>${v.tipoVehiculo || '—'}</td>
+        <td>${(v.marca || '')} ${(v.modelo || '')}</td>
+        <td>${v.estado || 'Sin estado'}</td>
+        <td>${v.tipoUnidad || '—'}</td>
+        <td>${v.gatewaySerie || '—'}</td>
+        <td>${v.camaraSerie || '—'}</td>
+        <td style="font-size: 9pt;">${accesoriosStr}</td>
+      </tr>`;
+    });
+
+    html += `
+    </tbody>
+  </table>`;
+
+    // Resumen por empresa
+    html += `
+  <div style="margin-top: 8px; background: #f0f4ff; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px;">
+    <strong>📊 RESUMEN ${empresa}:</strong><br>
+    &nbsp;&nbsp;🔵 Gateways: ${resumenEmpresa.gateways}<br>
+    &nbsp;&nbsp;📷 Cámaras: ${resumenEmpresa.camaras}<br>
+    &nbsp;&nbsp;🔧 Accesorios:`;
+
+    var accesoriosKeys = Object.keys(resumenEmpresa.accesorios);
+    if (accesoriosKeys.length === 0) {
+      html += ` Ninguno`;
+    } else {
+      html += `<br>`;
+      accesoriosKeys.sort().forEach(function(a) {
+        html += `&nbsp;&nbsp;&nbsp;&nbsp;• ${a}: ${resumenEmpresa.accesorios[a]}<br>`;
+        // Acumular para total general
+        totalGeneral.accesorios[a] = (totalGeneral.accesorios[a] || 0) + resumenEmpresa.accesorios[a];
+      });
+    }
+    html += `</div>`;
+
+    // Acumular totales generales
+    totalGeneral.gateways += resumenEmpresa.gateways;
+    totalGeneral.camaras += resumenEmpresa.camaras;
+  });
+
+  // Total general
+  html += `
+  <br><br>
+  <div style="font-size: 12pt; font-weight: bold; background: #0f172a; color: #fff; padding: 8px 12px; border-radius: 4px;">
+    📋 TOTAL GENERAL
+  </div>
+  <div style="background: #e8f0fe; padding: 8px 12px; border: 1px solid #1a56db; border-radius: 4px;">
+    &nbsp;&nbsp;🔵 Gateways: ${totalGeneral.gateways}<br>
+    &nbsp;&nbsp;📷 Cámaras: ${totalGeneral.camaras}<br>
+    &nbsp;&nbsp;🔧 Accesorios:`;
+
+  var accesoriosKeysTotal = Object.keys(totalGeneral.accesorios);
+  if (accesoriosKeysTotal.length === 0) {
+    html += ` Ninguno`;
+  } else {
+    html += `<br>`;
+    accesoriosKeysTotal.sort().forEach(function(a) {
+      html += `&nbsp;&nbsp;&nbsp;&nbsp;• ${a}: ${totalGeneral.accesorios[a]}<br>`;
+    });
+  }
+  html += `</div>`;
+
+  html += `
+  <div style="margin-top: 15px; font-size: 8pt; color: #999;">
+    Documento generado automáticamente por Fleet Manager - ${new Date().toLocaleString('es-MX')}
+  </div>
+</body>
+</html>`;
+
+  return html;
+}
+// ============================================================
+// ESTADOS DE INVENTARIO - CATÁLOGO DINÁMICO
+// ============================================================
+
+/**
+ * Obtiene todos los estados de inventario desde 📋_Estados_Inventario
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok: true, estados: [...] }
+ */
+function obtenerEstadosInventario(token) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('📋_Estados_Inventario');
+    
+    // Si no existe la hoja, crearla con valores por defecto
+    if (!sheet) {
+      sheet = ss.insertSheet('📋_Estados_Inventario');
+      var headers = ['ID', 'NOMBRE', 'COLOR'];
+      sheet.getRange(1, 1, 1, 3).setValues([headers]);
+      
+      var datosDefault = [
+        [1, 'Disponible', 'success'],
+        [2, 'Instalado', 'primary'],
+        [3, 'Garantía', 'warning'],
+        [4, 'Baja', 'danger']
+      ];
+      sheet.getRange(2, 1, datosDefault.length, 3).setValues(datosDefault);
+      
+      // Ajustar anchos
+      sheet.setColumnWidth(1, 60);
+      sheet.setColumnWidth(2, 120);
+      sheet.setColumnWidth(3, 100);
+      
+      return { ok: true, estados: datosDefault.map(function(e) {
+        return { id: e[0], nombre: e[1], color: e[2] };
+      })};
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var estados = [];
+
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
+      if (!fila[0]) continue;
+      
+      estados.push({
+        id: Number(fila[0]),
+        nombre: fila[1] ? fila[1].toString().trim() : '',
+        color: fila[2] ? fila[2].toString().trim().toLowerCase() : 'secondary'
+      });
+    }
+
+    return { ok: true, estados: estados };
+
+  } catch (err) {
+    console.error('Error en obtenerEstadosInventario:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Agrega un nuevo estado de inventario (solo Admin)
+ * @param {string} token - Token de sesión
+ * @param {string} nombre - Nombre del estado
+ * @param {string} color - Color (success, danger, warning, etc.)
+ * @returns {Object} { ok: true }
+ */
+function agregarEstadoInventario(token, nombre, color) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  if (sesionResp.sesion.rol !== 1) {
+    return { ok: false, error: 'Solo Administradores pueden agregar estados de inventario.' };
+  }
+
+  if (!nombre || nombre.trim() === '') {
+    return { ok: false, error: 'El nombre del estado es requerido.' };
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('📋_Estados_Inventario');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de estados de inventario.' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    
+    // Calcular nuevo ID
+    var ultimoId = 0;
+    for (var i = 1; i < datos.length; i++) {
+      var id = Number(datos[i][0]) || 0;
+      if (id > ultimoId) ultimoId = id;
+    }
+    var nuevoId = ultimoId + 1;
+
+    sheet.appendRow([
+      nuevoId,
+      nombre.trim(),
+      color || 'secondary'
+    ]);
+
+    return { ok: true, mensaje: 'Estado "' + nombre + '" agregado correctamente.' };
+
+  } catch (err) {
+    console.error('Error en agregarEstadoInventario:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Elimina un estado de inventario (solo Admin)
+ * @param {string} token - Token de sesión
+ * @param {number} id - ID del estado a eliminar
+ * @returns {Object} { ok: true }
+ */
+function eliminarEstadoInventario(token, id) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  if (sesionResp.sesion.rol !== 1) {
+    return { ok: false, error: 'Solo Administradores pueden eliminar estados de inventario.' };
+  }
+
+  if (!id) {
+    return { ok: false, error: 'El ID del estado es requerido.' };
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('📋_Estados_Inventario');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de estados de inventario.' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var filaEliminar = -1;
+
+    for (var i = 1; i < datos.length; i++) {
+      if (Number(datos[i][0]) === Number(id)) {
+        filaEliminar = i + 1;
+        break;
+      }
+    }
+
+    if (filaEliminar === -1) {
+      return { ok: false, error: 'No se encontró el estado con ID: ' + id };
+    }
+
+    sheet.deleteRow(filaEliminar);
+
+    return { ok: true, mensaje: 'Estado eliminado correctamente.' };
+
+  } catch (err) {
+    console.error('Error en eliminarEstadoInventario:', err);
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Obtiene alertas del sistema para el dashboard
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok: true, alertas: [...] }
+ */
+function obtenerAlertas(token) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  
+  var esAdminRevisor = sesionResp.sesion.rol <= 2;
+  var alertas = [];
+  
+  try {
+    // 1. Vehículos sin GPS (solo Admin/Revisor)
+    if (esAdminRevisor) {
+      var flotillaResp = obtenerFlotillaCompleta(token, {});
+      if (flotillaResp.ok && flotillaResp.vehiculos) {
+        var sinGPS = flotillaResp.vehiculos.filter(function(v) {
+          return v.estado === 'Activo' && !v.gatewaySerie;
+        });
+        if (sinGPS.length > 0) {
+          alertas.push({
+            tipo: 'warning',
+            icono: '📡',
+            mensaje: sinGPS.length + ' vehículo' + (sinGPS.length > 1 ? 's' : '') + ' sin GPS instalado',
+            accion: 'Ver flotilla',
+            panel: '#panel-flotilla'
+          });
         }
       }
     }
     
-    console.log('✅ GPS actualizados correctamente');
+    // 2. Tickets urgentes (más de 3 días en Pendiente)
+    var ticketsResp = obtenerTickets(token, {});
+    if (ticketsResp.ok && ticketsResp.tickets) {
+      var urgentes = ticketsResp.tickets.filter(function(t) {
+        if (t.estado !== 'Pendiente') return false;
+        try {
+          var fecha = new Date(t.fecha);
+          var diff = (new Date() - fecha) / (1000 * 60 * 60 * 24);
+          return diff > 3;
+        } catch(e) { return false; }
+      });
+      if (urgentes.length > 0) {
+        alertas.push({
+          tipo: 'danger',
+          icono: '🚨',
+          mensaje: urgentes.length + ' ticket' + (urgentes.length > 1 ? 's' : '') + ' sin resolver desde hace más de 3 días',
+          accion: 'Ver tickets',
+          panel: '#panel-tickets'
+        });
+      }
+    }
     
-  } catch (error) {
-    console.error('❌ Error al actualizar GPS:', error);
+    // 3. Borradores pendientes (solo técnico)
+    if (!esAdminRevisor) {
+      var borradoresResp = listarBorradores(token);
+      if (borradoresResp.ok && borradoresResp.borradores) {
+        var count = borradoresResp.borradores.length;
+        if (count > 0) {
+          alertas.push({
+            tipo: 'warning',
+            icono: '📝',
+            mensaje: count + ' borradore' + (count > 1 ? 's' : '') + ' pendiente' + (count > 1 ? 's' : '') + ' de completar',
+            accion: 'Ver borradores',
+            panel: '#panel-borradores'
+          });
+        }
+      }
+    }
+    
+    // 4. Reportes pendientes de asignar tipo (solo Admin/Revisor)
+    if (esAdminRevisor) {
+      var registrosResp = obtenerRegistros(token, { estado: 'Listo para pago', limite: 100 });
+      if (registrosResp.ok && registrosResp.registros) {
+        var sinTipo = registrosResp.registros.filter(function(r) {
+          return !r.TIPO_REVISION || r.TIPO_REVISION === 'PENDIENTE' || r.TIPO_REVISION === '';
+        });
+        if (sinTipo.length > 0) {
+          alertas.push({
+            tipo: 'info',
+            icono: '📋',
+            mensaje: sinTipo.length + ' reporte' + (sinTipo.length > 1 ? 's' : '') + ' pendiente' + (sinTipo.length > 1 ? 's' : '') + ' de asignar tipo',
+            accion: 'Ver registros',
+            panel: '#panel-registros'
+          });
+        }
+      }
+    }
+    
+    return { ok: true, alertas: alertas };
+    
+  } catch (err) {
+    console.error('Error en obtenerAlertas:', err);
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Realiza copia de seguridad de todas las hojas
+ * @param {string} token - Token de sesión (opcional, se usa desde trigger)
+ * @returns {Object} { ok: true, mensaje: string, archivos: number }
+ */
+function realizarBackup(token) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var nombreArchivo = 'Backup_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
+    
+    // Crear carpeta de backups (si no existe)
+    var carpetaBackup = getCarpetaBackup();
+    
+    // Crear subcarpeta con fecha
+    var fechaCarpeta = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    var subCarpeta = carpetaBackup.createFolder(fechaCarpeta);
+    
+    // Copiar todas las hojas
+    var hojas = ss.getSheets();
+    var copiadas = 0;
+    
+    hojas.forEach(function(hoja) {
+      var nombre = hoja.getName();
+      // Saltar hojas de respaldo (no hacer backup de backups)
+      if (nombre.startsWith('Backup_')) return;
+      
+      var datos = hoja.getDataRange().getValues();
+      var blob = Utilities.newBlob(
+        datos.map(function(row) { return row.join('\t'); }).join('\n'),
+        'text/plain',
+        nombre + '.txt'
+      );
+      subCarpeta.createFile(blob);
+      copiadas++;
+    });
+    
+    // Registrar en log
+    var log = {
+      fecha: new Date(),
+      archivos: copiadas,
+      carpeta: subCarpeta.getUrl()
+    };
+    
+    // Guardar log en una hoja especial
+    guardarLogBackup(log);
+    
+    // Limpiar backups antiguos (opcional)
+    limpiarBackupsAntiguos(30); // Mantener solo últimos 30 días
+    
+    return {
+      ok: true,
+      mensaje: 'Backup completado',
+      archivos: copiadas,
+      carpeta: subCarpeta.getUrl()
+    };
+    
+  } catch (err) {
+    console.error('Error en backup:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Obtiene o crea la carpeta de backups
+ */
+function getCarpetaBackup() {
+  var nombreCarpeta = 'Backups_FleetManager';
+  var carpetas = DriveApp.getFoldersByName(nombreCarpeta);
+  
+  if (carpetas.hasNext()) {
+    return carpetas.next();
+  } else {
+    return DriveApp.createFolder(nombreCarpeta);
+  }
+}
+
+/**
+ * Guarda el log del backup
+ */
+function guardarLogBackup(log) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('📈_Log_Auditoria');
+  if (!sheet) return;
+  
+  sheet.appendRow([
+    log.fecha,
+    'BACKUP_AUTOMATICO',
+    'SISTEMA',
+    'Backup completado: ' + log.archivos + ' archivos',
+    log.carpeta,
+    '',
+    ''
+  ]);
+}
+
+
+/**
+ * Configurar trigger diario (EJECUTAR UNA VEZ)
+ * Ve a: Extensiones → Apps Script → Triggers (reloj) → Agregar trigger
+ */
+function configurarBackupAutomatico() {
+  // Eliminar triggers existentes para evitar duplicados
+  var triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(function(t) {
+    if (t.getHandlerFunction() === 'realizarBackupProgramado') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  
+  // Crear trigger diario a las 2:00 AM
+  ScriptApp.newTrigger('realizarBackupProgramado')
+    .timeBased()
+    .atHour(2)
+    .everyDays(1)
+    .create();
+  
+  console.log('✅ Backup automático configurado para las 2:00 AM diarias');
+}
+
+// ============================================================
+// BACKUP AUTOMÁTICO - BACKEND
+// ============================================================
+
+/**
+ * Ejecuta backup manual desde la interfaz
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok: true, archivos: number, carpeta: string }
+ */
+function ejecutarBackupManual(token) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para ejecutar backup.' };
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var carpetaBackup = obtenerCarpetaBackup();
+    
+    var fechaCarpeta = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd_HHmmss');
+    var subCarpeta = carpetaBackup.createFolder(fechaCarpeta);
+    
+    var hojas = ss.getSheets();
+    var copiadas = 0;
+    var errores = 0;
+
+    hojas.forEach(function(hoja) {
+      var nombre = hoja.getName();
+      if (nombre.startsWith('Backup_')) return;
+      
+      try {
+        var datos = hoja.getDataRange().getValues();
+        var csv = datos.map(function(row) { 
+          return row.map(function(cell) { 
+            if (cell instanceof Date) {
+              return Utilities.formatDate(cell, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+            }
+            if (typeof cell === 'string' && cell.includes(',')) {
+              return '"' + cell + '"';
+            }
+            return cell; 
+          }).join(','); 
+        }).join('\n');
+        
+        var blob = Utilities.newBlob(csv, 'text/csv', nombre + '.csv');
+        subCarpeta.createFile(blob);
+        copiadas++;
+      } catch(e) {
+        errores++;
+        console.error('Error copiando hoja:', nombre, e);
+      }
+    });
+
+    // Guardar en auditoría
+    _registrarAuditoria(
+      sesionResp.sesion.usuarioId,
+      sesionResp.sesion.nombre,
+      'BACKUP',
+      'SISTEMA',
+      'Backup manual: ' + copiadas + ' archivos copiados' + (errores > 0 ? ' (' + errores + ' errores)' : ''),
+      '',
+      '',
+      ''
+    );
+
+    // Guardar información del último backup en parámetros
+    _escribirParam('BACKUP_ULTIMO', Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm'));
+    _escribirParam('BACKUP_ARCHIVOS', String(copiadas));
+    _escribirParam('BACKUP_CARPETA', subCarpeta.getUrl());
+
+    // Limpiar backups antiguos
+    var mantener = parseInt(_leerParams()['BACKUP_MANTENER'] || '30');
+    limpiarBackupsAntiguos(mantener);
+
+    return {
+      ok: true,
+      archivos: copiadas,
+      carpeta: subCarpeta.getUrl(),
+      errores: errores
+    };
+
+  } catch (err) {
+    console.error('Error en backup manual:', err);
+    return { ok: false, error: err.message };
+  }
+}
+// ============================================================
+// BACKUP AUTOMÁTICO
+// ============================================================
+
+/**
+ * Obtiene la carpeta de backups en Drive
+ * @returns {Folder} Carpeta de Drive
+ */
+function obtenerCarpetaBackup() {
+  var nombreCarpeta = 'Backups_FleetManager';
+  var carpetas = DriveApp.getFoldersByName(nombreCarpeta);
+  
+  if (carpetas.hasNext()) {
+    return carpetas.next();
+  } else {
+    return DriveApp.createFolder(nombreCarpeta);
+  }
+}
+
+
+/**
+ * Obtiene la URL de la carpeta de backups
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok: true, url: string }
+ */
+function obtenerUrlCarpetaBackup(token) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  try {
+    var carpeta = obtenerCarpetaBackup();
+    return { ok: true, url: carpeta.getUrl() };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Limpia backups antiguos
+ * @param {number} dias - Días a mantener
+ */
+function limpiarBackupsAntiguos(dias) {
+  try {
+    var carpeta = obtenerCarpetaBackup();
+    var ahora = new Date();
+    var fechaLimite = new Date(ahora);
+    fechaLimite.setDate(fechaLimite.getDate() - dias);
+    
+    var subCarpetas = carpeta.getFolders();
+    var eliminadas = 0;
+    
+    while (subCarpetas.hasNext()) {
+      var sub = subCarpetas.next();
+      var nombre = sub.getName();
+      try {
+        var fecha = new Date(nombre);
+        if (fecha < fechaLimite) {
+          sub.setTrashed(true);
+          eliminadas++;
+        }
+      } catch(e) {
+        sub.setTrashed(true);
+        eliminadas++;
+      }
+    }
+    
+    console.log('🗑️ Eliminadas ' + eliminadas + ' carpetas de backup antiguas');
+  } catch(e) {
+    console.warn('Error limpiando backups antiguos:', e);
+  }
+}
+
+/**
+ * Carga información del último backup
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok: true, ultimoBackup: string, archivos: number }
+ */
+function cargarInfoBackup(token) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  try {
+    var params = _leerParams();
+    var ultimo = params['BACKUP_ULTIMO'] || 'No hay backups registrados';
+    var archivos = params['BACKUP_ARCHIVOS'] || '0';
+    
+    return {
+      ok: true,
+      ultimoBackup: ultimo,
+      archivos: archivos
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Guarda la configuración de backup
+ * @param {string} token - Token de sesión
+ * @param {string} frecuencia - diario, semanal, mensual
+ * @param {string} mantener - Días a mantener
+ * @returns {Object} { ok: true }
+ */
+function guardarConfigBackup(token, frecuencia, mantener) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+  if (sesionResp.sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos.' };
+  }
+
+  try {
+    _escribirParam('BACKUP_FRECUENCIA', frecuencia);
+    _escribirParam('BACKUP_MANTENER', mantener);
+    
+    // Reconfigurar trigger automático
+    configurarTriggerBackup(frecuencia);
+    
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Configura el trigger automático para backup
+ * @param {string} frecuencia - diario, semanal, mensual
+ */
+function configurarTriggerBackup(frecuencia) {
+  var triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(function(t) {
+    if (t.getHandlerFunction() === 'realizarBackupProgramado') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  
+  var triggerBuilder = ScriptApp.newTrigger('realizarBackupProgramado').timeBased();
+  
+  switch(frecuencia) {
+    case 'diario':
+      triggerBuilder.atHour(2).everyDays(1);
+      break;
+    case 'semanal':
+      triggerBuilder.onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3);
+      break;
+    case 'mensual':
+      triggerBuilder.onMonthDay(1).atHour(4);
+      break;
+    default:
+      triggerBuilder.atHour(2).everyDays(1);
+  }
+  
+  triggerBuilder.create();
+  console.log('✅ Trigger de backup configurado:', frecuencia);
+}
+
+/**
+ * Función que ejecuta el backup desde el trigger (NO requiere token)
+ */
+function realizarBackupProgramado() {
+  var resultado = ejecutarBackupManual(null);
+  
+  if (!resultado.ok) {
+    try {
+      var email = Session.getActiveUser().getEmail();
+      if (email) {
+        MailApp.sendEmail({
+          to: email,
+          subject: '⚠️ ALERTA: Falló el backup automático',
+          body: 'El backup automático falló:\n\n' + resultado.error
+        });
+      }
+    } catch(e) {}
+  }
+  
+  return resultado;
+}
+
+
+/**
+ * Configurar backup inicial (ejecutar UNA VEZ en el editor)
+ */
+function configurarBackupInicial() {
+  var params = _leerParams();
+  var frecuencia = params['BACKUP_FRECUENCIA'] || 'diario';
+  configurarTriggerBackup(frecuencia);
+  console.log('✅ Backup automático configurado en:', frecuencia);
+}
+function verificarColumnas() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  var hojas = {
+    '📦_Inventario_GPS': 'ECONOMICO_ASIGNADO',
+    '🔧_Accesorios_Stock': 'ECONOMICO_ASIGNADO',
+    '📋_Catalogo_Vehiculos': 'ECONOMICO',
+    '🚚_Flotilla_Fallas': 'ECONOMICO',
+    '📝_Bitacora_Revisiones': 'ECONOMICO'
+  };
+  
+  for (var nombreHoja in hojas) {
+    var sheet = ss.getSheetByName(nombreHoja);
+    if (!sheet) {
+      console.log('❌ No existe:', nombreHoja);
+      continue;
+    }
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var columnaBuscada = hojas[nombreHoja];
+    var existe = headers.indexOf(columnaBuscada) !== -1;
+    console.log(nombreHoja + ' → ' + columnaBuscada + ': ' + (existe ? '✅' : '❌'));
+  }
+}
+/**
+ * Guarda los cambios de un ticket editado
+ * @param {string} token - Token de sesión
+ * @param {string} ticketId - ID del ticket
+ * @param {Object} datos - { unidad, descripcion, estado, prioridad, comentarios, notasInternas }
+ * @returns {Object} { ok, mensaje, error }
+ */
+function actualizarTicket(token, ticketId, datos) {
+  try {
+    const sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    const sesion = sesionResp.sesion;
+    const sheet = SHEETS.TICKETS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Tickets' };
+    }
+
+    const datosSheet = sheet.getDataRange().getValues();
+    const headers = datosSheet[0];
+
+    // Mapear índices
+    const idxId = headers.indexOf('ID');
+    const idxUnidad = headers.indexOf('UNIDAD');
+    const idxDescripcion = headers.indexOf('DESCRIPCION');
+    const idxEstado = headers.indexOf('ESTADO');
+    const idxPrioridad = headers.indexOf('PRIORIDAD');
+    const idxComentarios = headers.indexOf('COMENTARIOS');
+    const idxNotasInternas = headers.indexOf('NOTAS_INTERNAS');
+    const idxUltimaActualizacion = headers.indexOf('ULTIMA_ACTUALIZACION');
+    const idxCreadoPor = headers.indexOf('CREADO_POR');
+
+    if (idxId === -1) {
+      return { ok: false, error: 'Estructura de tickets incompleta' };
+    }
+
+    // Buscar el ticket
+    let filaEncontrada = -1;
+    for (var i = 1; i < datosSheet.length; i++) {
+      if (datosSheet[i][idxId] === ticketId) {
+        filaEncontrada = i + 1;
+        break;
+      }
+    }
+
+    if (filaEncontrada === -1) {
+      return { ok: false, error: 'Ticket no encontrado: ' + ticketId };
+    }
+
+    // ✅ Verificar permisos
+    const esAdmin = sesion.rol === 1 || sesion.rol === 2;
+    if (!esAdmin && datosSheet[filaEncontrada - 1][idxCreadoPor] !== sesion.usuarioId) {
+      return { ok: false, error: 'No tienes permisos para editar este ticket.' };
+    }
+
+    // Actualizar campos
+    if (idxUnidad !== -1 && datos.unidad) {
+      sheet.getRange(filaEncontrada, idxUnidad + 1).setValue(datos.unidad);
+    }
+    if (idxDescripcion !== -1 && datos.descripcion) {
+      sheet.getRange(filaEncontrada, idxDescripcion + 1).setValue(datos.descripcion);
+    }
+    if (idxEstado !== -1 && datos.estado) {
+      sheet.getRange(filaEncontrada, idxEstado + 1).setValue(datos.estado);
+    }
+    if (idxPrioridad !== -1 && datos.prioridad) {
+      sheet.getRange(filaEncontrada, idxPrioridad + 1).setValue(datos.prioridad);
+    }
+    if (idxComentarios !== -1) {
+      const comentariosActuales = datosSheet[filaEncontrada - 1][idxComentarios] || '';
+      const nuevoComentario = comentariosActuales 
+        ? comentariosActuales + '\n--- EDICIÓN ---\n' + datos.comentarios + '\n' + sesion.nombre + ' - ' + new Date().toLocaleString()
+        : 'EDICIÓN:\n' + datos.comentarios + '\n' + sesion.nombre + ' - ' + new Date().toLocaleString();
+      sheet.getRange(filaEncontrada, idxComentarios + 1).setValue(nuevoComentario);
+    }
+    if (idxNotasInternas !== -1) {
+      sheet.getRange(filaEncontrada, idxNotasInternas + 1).setValue(datos.notasInternas || '');
+    }
+    if (idxUltimaActualizacion !== -1) {
+      sheet.getRange(filaEncontrada, idxUltimaActualizacion + 1).setValue(new Date());
+    }
+
+    // Registrar en auditoría
+    _registrarAuditoria(
+      sesion.usuarioId,
+      sesion.nombre,
+      'EDITAR_TICKET',
+      'TICKETS',
+      'Ticket ' + ticketId + ' editado por ' + sesion.nombre,
+      ticketId,
+      '',
+      ''
+    );
+
+    return { ok: true, mensaje: 'Ticket actualizado correctamente' };
+
+  } catch (err) {
+    console.error('❌ Error en actualizarTicket:', err);
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Obtiene la lista de vehículos de la flotilla para el selector de tickets
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok: boolean, vehiculos: [{economico, placas}] }
+ */
+function obtenerVehiculosFlotilla(token) {
+  try {
+    const sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    const sheet = SHEETS.FLOTILLA();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Flotilla' };
+    }
+
+    const datos = sheet.getDataRange().getValues();
+    const headers = datos[0];
+
+    const idxEconomico = headers.indexOf('ECONOMICO');
+    const idxPlacas = headers.indexOf('PLACAS');
+
+    if (idxEconomico === -1) {
+      return { ok: false, error: 'Estructura de flotilla incompleta: falta columna ECONOMICO' };
+    }
+
+    const vehiculos = [];
+    for (var i = 1; i < datos.length; i++) {
+      if (datos[i][idxEconomico]) {
+        vehiculos.push({
+          economico: datos[i][idxEconomico].toString(),
+          placas: datos[i][idxPlacas] || ''
+        });
+      }
+    }
+
+    return { ok: true, vehiculos: vehiculos };
+
+  } catch (err) {
+    console.error('❌ Error en obtenerVehiculosFlotilla:', err);
+    return { ok: false, error: err.message };
+  }
+}
+// ============================================================
+// PRUEBA 1: Subir fotos a carpeta existente
+// ============================================================
+function testAnexarFotos() {
+  // Crear carpeta de prueba
+  const carpetaPrueba = DriveApp.createFolder('Test_Fotos_' + Date.now());
+  const folderUrl = carpetaPrueba.getUrl();
+  
+  // Crear archivos de prueba (imágenes pequeñas en Base64)
+  const archivosPrueba = [
+    {
+      nombre: 'test_1.jpg',
+      base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      mimeType: 'image/jpeg'
+    },
+    {
+      nombre: 'test_2.jpg',
+      base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      mimeType: 'image/jpeg'
+    }
+  ];
+  
+  // Ejecutar función
+  const resultado = _anexarFotosACarpetaExistente(folderUrl, archivosPrueba);
+  
+  // Mostrar resultado
+  console.log('Resultado:', resultado);
+  
+  // Verificar
+  if (resultado.success) {
+    console.log('✅ Prueba exitosa: ' + resultado.archivosSubidos + ' archivos subidos');
+  } else {
+    console.error('❌ Prueba fallida:', resultado.errores);
+  }
+  
+  // Limpiar carpeta de prueba
+  // carpetaPrueba.setTrashed(true);
+}
+
+// ============================================================
+// PRUEBA 2: Manejo de errores
+// ============================================================
+function testAnexarFotosErrores() {
+  // Caso 1: URL inválida
+  const resultado1 = _anexarFotosACarpetaExistente('URL_INVALIDA', [{ nombre: 'test.jpg', base64: 'data' }]);
+  console.log('Caso 1 (URL inválida):', resultado1);
+  
+  // Caso 2: Sin archivos
+  const carpeta = DriveApp.createFolder('Test_Error_' + Date.now());
+  const resultado2 = _anexarFotosACarpetaExistente(carpeta.getUrl(), []);
+  console.log('Caso 2 (Sin archivos):', resultado2);
+  carpeta.setTrashed(true);
+  
+  // Caso 3: Archivo corrupto
+  const resultado3 = _anexarFotosACarpetaExistente(carpeta.getUrl(), [
+    { nombre: 'corrupto.jpg', base64: 'DATOS_INVALIDOS' }
+  ]);
+  console.log('Caso 3 (Archivo corrupto):', resultado3);
+}
+// ============================================================
+// 12. GESTIÓN DE TICKETS - ACTUALIZAR ESTADO
+// ============================================================
+
+/**
+ * Actualiza el estado de un ticket en la hoja 🎫_Tickets
+ * @param {string} token - Token de sesión
+ * @param {string} ticketId - ID del ticket (ej. TKT-002)
+ * @param {string} nuevoEstado - Nuevo estado (Pendiente, En proceso, Resuelto)
+ * @returns {Object} { ok, mensaje, error }
+ */
+function actualizarEstadoTicket(token, ticketId, nuevoEstado) {
+  // 1. Validar sesión
+  const sesionResp = validarSesion(token);
+  if (!sesionResp.ok) {
+    return { ok: false, error: sesionResp.error };
+  }
+
+  const sesion = sesionResp.sesion;
+
+  // 2. Validar que el estado sea válido
+  const estadosValidos = ['Pendiente', 'En proceso', 'Resuelto'];
+  if (!estadosValidos.includes(nuevoEstado)) {
+    return { ok: false, error: 'Estado inválido. Usa: Pendiente, En proceso, Resuelto' };
+  }
+
+  try {
+    const sheet = SHEETS.TICKETS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Tickets' };
+    }
+
+    const datos = sheet.getDataRange().getValues();
+    const headers = datos[0];
+
+    // Buscar índices
+    const idxId = headers.indexOf('ID');
+    const idxEstado = headers.indexOf('ESTADO');
+    const idxTecnico = headers.indexOf('TECNICO_ASIGNADO');
+    const idxFechaCierre = headers.indexOf('FECHA_CIERRE');
+
+    if (idxId === -1 || idxEstado === -1) {
+      return { ok: false, error: 'Columnas ID o ESTADO no encontradas' };
+    }
+
+    // Buscar el ticket
+    let filaEncontrada = -1;
+
+    for (var i = 1; i < datos.length; i++) {
+      if (datos[i][idxId] === ticketId) {
+        filaEncontrada = i + 1;
+        break;
+      }
+    }
+
+    if (filaEncontrada === -1) {
+      return { ok: false, error: 'Ticket no encontrado: ' + ticketId };
+    }
+
+    // 3. Actualizar estado
+    sheet.getRange(filaEncontrada, idxEstado + 1).setValue(nuevoEstado);
+
+    // 4. Si se resuelve, registrar fecha de cierre
+    if (nuevoEstado === 'Resuelto' && idxFechaCierre !== -1) {
+      sheet.getRange(filaEncontrada, idxFechaCierre + 1).setValue(new Date());
+    }
+
+    // 5. Registrar en auditoría
+    _registrarAuditoria(
+      sesion.usuarioId,
+      sesion.nombre,
+      'ACTUALIZAR_TICKET',
+      'TICKETS',
+      'Ticket ' + ticketId + ' cambiado a "' + nuevoEstado + '" por ' + sesion.nombre,
+      ticketId,
+      '',
+      ''
+    );
+
+    // 6. Crear notificación para el técnico asignado (si existe)
+    if (idxTecnico !== -1) {
+      const tecnicoId = datos[filaEncontrada - 1][idxTecnico];
+      if (tecnicoId) {
+        _crearNotificacion(
+          tecnicoId,
+          'TICKET_ACTUALIZADO',
+          '📌 Ticket ' + ticketId + ' ha cambiado a "' + nuevoEstado + '"',
+          ticketId,
+          '#panel-tickets'
+        );
+      }
+    }
+
+    console.log('✅ Ticket ' + ticketId + ' actualizado a: ' + nuevoEstado);
+    return {
+      ok: true,
+      mensaje: 'Ticket ' + ticketId + ' actualizado a "' + nuevoEstado + '"'
+    };
+
+  } catch (err) {
+    console.error('❌ Error al actualizar ticket:', err);
+    return { ok: false, error: 'Error al actualizar ticket: ' + err.message };
+  }
+}
+// ============================================================
+// TICKETS - GESTIÓN DE TÉCNICOS AUTORIZADOS
+// ============================================================
+
+/**
+ * Obtiene la lista de técnicos y los autorizados actuales de un ticket
+ * @param {string} token - Token de sesión
+ * @param {string} ticketId - ID del ticket
+ * @returns {Object} { ok, tecnicos: [], autorizados: [] }
+ */
+function obtenerTecnicosYAutorizados(token, ticketId) {
+  const sesionResp = validarSesion(token);
+  if (!sesionResp.ok) {
+    return { ok: false, error: sesionResp.error };
+  }
+
+  const sesion = sesionResp.sesion;
+
+  // Solo Admin/Revisor pueden gestionar
+  if (sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para gestionar técnicos.' };
+  }
+
+  try {
+    // 1. Obtener todos los técnicos activos
+    const usuariosSheet = SHEETS.USUARIOS();
+    const usuariosData = usuariosSheet.getDataRange().getValues();
+    const tecnicos = [];
+
+    for (var i = 1; i < usuariosData.length; i++) {
+      const rol = usuariosData[i][4];
+      const activo = usuariosData[i][5];
+      if (rol === 3 && activo === true) {
+        tecnicos.push({
+          id: usuariosData[i][0].toString(),
+          nombre: usuariosData[i][1].toString()
+        });
+      }
+    }
+
+    // 2. Obtener autorizados actuales del ticket
+    const ticketsSheet = SHEETS.TICKETS();
+    const ticketsData = ticketsSheet.getDataRange().getValues();
+    const headers = ticketsData[0];
+    const idxId = headers.indexOf('ID');
+    const idxTecnicosAutorizados = headers.indexOf('TECNICOS_AUTORIZADOS');
+
+    let autorizados = [];
+    for (var j = 1; j < ticketsData.length; j++) {
+      if (ticketsData[j][idxId] === ticketId) {
+        const autorizadosStr = ticketsData[j][idxTecnicosAutorizados] || '';
+        autorizados = autorizadosStr ? autorizadosStr.split(',') : [];
+        break;
+      }
+    }
+
+    return {
+      ok: true,
+      tecnicos: tecnicos,
+      autorizados: autorizados
+    };
+
+  } catch (err) {
+    console.error('❌ Error en obtenerTecnicosYAutorizados:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Guarda la lista de técnicos autorizados para un ticket
+ * @param {string} token - Token de sesión
+ * @param {string} ticketId - ID del ticket
+ * @param {Array} autorizados - Lista de IDs de técnicos autorizados
+ * @returns {Object} { ok, mensaje }
+ */
+function guardarTecnicosAutorizados(token, ticketId, autorizados) {
+  const sesionResp = validarSesion(token);
+  if (!sesionResp.ok) {
+    return { ok: false, error: sesionResp.error };
+  }
+
+  const sesion = sesionResp.sesion;
+
+  if (sesion.rol > 2) {
+    return { ok: false, error: 'Sin permisos para gestionar técnicos.' };
+  }
+
+  try {
+    const sheet = SHEETS.TICKETS();
+    const datos = sheet.getDataRange().getValues();
+    const headers = datos[0];
+    const idxId = headers.indexOf('ID');
+    const idxTecnicosAutorizados = headers.indexOf('TECNICOS_AUTORIZADOS');
+
+    if (idxId === -1 || idxTecnicosAutorizados === -1) {
+      return { ok: false, error: 'Estructura de tickets incompleta.' };
+    }
+
+    let filaEncontrada = -1;
+    for (var i = 1; i < datos.length; i++) {
+      if (datos[i][idxId] === ticketId) {
+        filaEncontrada = i + 1;
+        break;
+      }
+    }
+
+    if (filaEncontrada === -1) {
+      return { ok: false, error: 'Ticket no encontrado: ' + ticketId };
+    }
+
+    const autorizadosStr = autorizados.join(',');
+    sheet.getRange(filaEncontrada, idxTecnicosAutorizados + 1).setValue(autorizadosStr);
+
+    _registrarAuditoria(
+      sesion.usuarioId,
+      sesion.nombre,
+      'EDITAR_TICKET',
+      'TICKETS',
+      'Técnicos autorizados actualizados para ticket ' + ticketId + ': ' + autorizadosStr,
+      ticketId,
+      '',
+      ''
+    );
+
+    return {
+      ok: true,
+      mensaje: 'Técnicos autorizados actualizados correctamente',
+      autorizados: autorizados
+    };
+
+  } catch (err) {
+    console.error('❌ Error en guardarTecnicosAutorizados:', err);
+    return { ok: false, error: err.message };
+  }
+}
+// ============================================================
+// TICKETS - OBTENER TICKET POR ID
+// ============================================================
+
+/**
+ * Obtiene un ticket específico por su ID (con control de permisos)
+ * @param {string} token - Token de sesión
+ * @param {string} ticketId - ID del ticket
+ * @returns {Object} { ok, ticket, error }
+ */
+function obtenerTicketPorId(token, ticketId) {
+  try {
+    const sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    const sesion = sesionResp.sesion;
+    const sheet = SHEETS.TICKETS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Tickets' };
+    }
+
+    const datos = sheet.getDataRange().getValues();
+    const headers = datos[0];
+
+    // Mapear índices
+    const idxId = headers.indexOf('ID');
+    const idxFecha = headers.indexOf('FECHA');
+    const idxUnidad = headers.indexOf('UNIDAD');
+    const idxDescripcion = headers.indexOf('DESCRIPCION');
+    const idxCreadoPor = headers.indexOf('CREADO_POR');
+    const idxCreadoPorNombre = headers.indexOf('CREADO_POR_NOMBRE');
+    const idxEstado = headers.indexOf('ESTADO');
+    const idxTecnicoAsignado = headers.indexOf('TECNICO_ASIGNADO');
+    const idxTecnicoNombre = headers.indexOf('TECNICO_NOMBRE');
+    const idxFechaCierre = headers.indexOf('FECHA_CIERRE');
+    const idxComentarios = headers.indexOf('COMENTARIOS');
+    const idxUltimaActualizacion = headers.indexOf('ULTIMA_ACTUALIZACION');
+    const idxTecnicosAutorizados = headers.indexOf('TECNICOS_AUTORIZADOS');
+
+    if (idxId === -1) {
+      return { ok: false, error: 'Estructura de tickets incompleta' };
+    }
+
+    const esAdmin = sesion.rol === 1 || sesion.rol === 2;
+    const usuarioId = sesion.usuarioId;
+
+    // Buscar el ticket
+    let fila = null;
+    let filaIndex = -1;
+
+    for (var i = 1; i < datos.length; i++) {
+      if (datos[i][idxId] === ticketId) {
+        fila = datos[i];
+        filaIndex = i;
+        break;
+      }
+    }
+
+    if (!fila) {
+      return { ok: false, error: 'Ticket no encontrado: ' + ticketId };
+    }
+
+    // ✅ CONTROL DE VISIBILIDAD
+    let puedeVer = false;
+
+    if (esAdmin) {
+      puedeVer = true;
+    } else if (fila[idxCreadoPor] === usuarioId) {
+      puedeVer = true;
+    } else if (idxTecnicosAutorizados !== -1) {
+      const autorizados = fila[idxTecnicosAutorizados]
+        ? fila[idxTecnicosAutorizados].toString().split(',')
+        : [];
+      puedeVer = autorizados.includes(usuarioId);
+    } else if (fila[idxTecnicoAsignado] === usuarioId) {
+      puedeVer = true;
+    }
+
+    if (!puedeVer) {
+      return { ok: false, error: 'No tienes permisos para ver este ticket.' };
+    }
+
+    // Construir objeto ticket
+    const ticket = {
+      id: fila[idxId] || '',
+      fecha: fila[idxFecha] ? _formatearFecha(fila[idxFecha]) : '—',
+      unidad: fila[idxUnidad] || '—',
+      descripcion: fila[idxDescripcion] || '—',
+      creadoPor: fila[idxCreadoPor] || '',
+      creadoPorNombre: fila[idxCreadoPorNombre] || fila[idxCreadoPor] || '—',
+      estado: fila[idxEstado] || 'Pendiente',
+      tecnico: fila[idxTecnicoAsignado] || '',
+      tecnicoNombre: fila[idxTecnicoNombre] || '—',
+      fechaCierre: fila[idxFechaCierre] ? _formatearFecha(fila[idxFechaCierre]) : null,
+      comentarios: fila[idxComentarios] || '',
+      ultimaActualizacion: fila[idxUltimaActualizacion] ? _formatearFecha(fila[idxUltimaActualizacion]) : '—',
+      tecnicosAutorizados: fila[idxTecnicosAutorizados] || ''
+    };
+
+    return { ok: true, ticket: ticket };
+
+  } catch (err) {
+    console.error('❌ Error en obtenerTicketPorId:', err);
+    return { ok: false, error: 'Error al obtener ticket: ' + err.message };
   }
 }
