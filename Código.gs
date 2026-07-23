@@ -1214,102 +1214,273 @@ function verificarBaseDatos() {
  * @returns {Object} Respuesta transaccional formal con metadatos del folio
  */
 function recibirReporteMejorado(token, datos, archivos, ubicacion) {
+  // ============================================================
+  // 1. VALIDACIÓN DE SESIÓN
+  // ============================================================
+  
   var sesionResp = validarSesion(token);
-  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  if (!sesionResp.ok) {
+    return { ok: false, error: sesionResp.error };
+  }
+  
   var sesion = sesionResp.sesion;
 
-  if (sesion.rol > 3) return { ok: false, error: 'Sin permisos para reportar.' };
+  if (sesion.rol > 3) {
+    return { ok: false, error: 'Sin permisos para reportar.' };
+  }
 
   try {
+    // ============================================================
+    // 2. VALIDAR HOJA DE BITÁCORA
+    // ============================================================
+    
+    var sheet = SHEETS.BITACORA();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Bitácora.' };
+    }
+
     var ahora = new Date();
     var latitud = ubicacion ? ubicacion.latitud : null;
     var longitud = ubicacion ? ubicacion.longitud : null;
 
-    var sheet = SHEETS.BITACORA();
-    if (!sheet) {
-      return { ok: false, error: 'No se encontró la hoja de Bitácora' };
-    }
-
-    // ✅ GENERAR FOLIO
+    // ============================================================
+    // 3. GENERAR FOLIO Y SUBIR FOTOS
+    // ============================================================
+    
     var folio = generarFolio();
+    console.log('📋 Procesando Folio [' + folio + '] Tipo: ' + (datos.tipoServicio || 'No especificado'));
 
-    // ✅ SUBIR FOTOS
+    // Subir fotos a Drive
     var folderUrl = '';
     if (archivos && archivos.length > 0) {
       try {
         folderUrl = _subirFotosDrive(folio, archivos);
+        console.log('📁 Fotos subidas a:', folderUrl);
       } catch (fotoError) {
         console.warn('⚠️ Error al subir fotos:', fotoError.message);
         folderUrl = '';
       }
     }
 
-    // ✅ PREPARAR DATOS PARA BITÁCORA
-    // El tipo de servicio se deja como "Pendiente" o vacío para que el Revisor lo asigne
+    // ============================================================
+    // 4. ACTUALIZAR INVENTARIO (SEGÚN TIPO DE SERVICIO)
+    // ============================================================
+    
+    var tipoServicio = datos.tipoServicio || '';
+    var serieGPS = datos.serieGPS || datos.gateway || '';
+    var economico = datos.economico || '';
+    var camaraVieja = datos.camaraVieja || '';
+    var camaraNueva = datos.camaraNueva || '';
+
+    console.log('📌 PROCESANDO ACTUALIZACIÓN DE INVENTARIO:');
+    console.log('   tipoServicio:', tipoServicio);
+    console.log('   serieGPS:', serieGPS || 'NO HAY SERIE');
+    console.log('   economico:', economico);
+    console.log('   camaraVieja:', camaraVieja || 'NO HAY');
+    console.log('   camaraNueva:', camaraNueva || 'NO HAY');
+
+    // ============================================================
+    // 4.1 INSTALACIÓN
+    // ============================================================
+    if (tipoServicio === 'instalacion' && serieGPS && economico) {
+      try {
+        // Verificar si el vehículo ya tiene equipos instalados
+        var equiposExistentes = _verificarEquiposVehiculo(economico);
+        if (equiposExistentes && (equiposExistentes.gateway || equiposExistentes.camara)) {
+          console.warn('⚠️ El vehículo ' + economico + ' ya tiene equipos instalados:');
+          if (equiposExistentes.gateway) console.warn('   Gateway:', equiposExistentes.gateway);
+          if (equiposExistentes.camara) console.warn('   Cámara:', equiposExistentes.camara);
+          // No bloqueamos, solo advertimos
+        }
+        
+        console.log('📦 Instalando GPS en inventario...');
+        var resultadoInventario = _actualizarEstadoGPS(serieGPS, economico);
+        console.log('📦 Resultado instalación:', JSON.stringify(resultadoInventario));
+      } catch (invError) {
+        console.warn('⚠️ Error al actualizar inventario (Instalación):', invError.message);
+      }
+    }
+
+    // ============================================================
+    // 4.2 DESINSTALACIÓN
+    // ============================================================
+    else if (tipoServicio === 'desinstalacion' && serieGPS) {
+      try {
+        console.log('📦 Desinstalando GPS de inventario...');
+        var resultadoInventario = _actualizarEstadoGPSDesinstalacion(serieGPS);
+        console.log('📦 Resultado desinstalación:', JSON.stringify(resultadoInventario));
+      } catch (invError) {
+        console.warn('⚠️ Error al actualizar inventario (Desinstalación):', invError.message);
+      }
+    }
+
+    // ============================================================
+    // 4.3 REVISIÓN / DIAGNÓSTICO
+    // ============================================================
+    else if (tipoServicio === 'revision') {
+      try {
+        console.log('📦 Procesando cambios de inventario por Revisión...');
+        
+        // ✅ Si se reemplazó la cámara
+        if (camaraVieja && camaraNueva && economico) {
+          console.log('📷 Reemplazando cámara:', camaraVieja, '→', camaraNueva);
+          var resultadoCamara = _actualizarEstadoGPSReemplazo(camaraVieja, camaraNueva, economico);
+          console.log('📦 Resultado reemplazo de cámara:', JSON.stringify(resultadoCamara));
+        }
+        
+        // ✅ Si se reemplazó el gateway
+        if (datos.gatewayViejo && datos.gatewayNuevo && economico) {
+          console.log('📡 Reemplazando gateway:', datos.gatewayViejo, '→', datos.gatewayNuevo);
+          var resultadoGateway = _actualizarEstadoGPSReemplazo(datos.gatewayViejo, datos.gatewayNuevo, economico);
+          console.log('📦 Resultado reemplazo de gateway:', JSON.stringify(resultadoGateway));
+        }
+        
+        // ✅ Si solo se retiró un equipo (sin reemplazo)
+        if (datos.equipoRetirado && !datos.equipoNuevo) {
+          console.log('🗑️ Retirando equipo:', datos.equipoRetirado);
+          var resultadoRetiro = _actualizarEstadoGPSDesinstalacion(datos.equipoRetirado);
+          console.log('📦 Resultado retiro:', JSON.stringify(resultadoRetiro));
+        }
+      } catch (invError) {
+        console.warn('⚠️ Error al actualizar inventario (Revisión):', invError.message);
+      }
+    }
+
+    // ============================================================
+    // 5. PREPARAR DATOS PARA BITÁCORA
+    // ============================================================
+    
     var headers = sheet.getDataRange().getValues()[0];
     var filaData = new Array(headers.length).fill('');
 
-    // Mapear índices
+    // Mapear índices de columnas
     var idxFolio = headers.indexOf('FOLIO');
-    var idxFechaReporte = headers.indexOf('FECHA_REPORTE');
-    var idxTecnico = headers.indexOf('TECNICO');
-    var idxGPS = headers.indexOf('GPS');
-    var idxCliente = headers.indexOf('CLIENTE');
+    var idxFechaServicio = headers.indexOf('FECHA_SERVICIO');
+    var idxEconomico = headers.indexOf('ECONOMICO');
+    var idxPlacas = headers.indexOf('PLACAS');
+    var idxSerieGPS = headers.indexOf('SERIE_GPS');
     var idxTipoRevision = headers.indexOf('TIPO_REVISION');
-    var idxObservaciones = headers.indexOf('OBSERVACIONES');
-    var idxEstado = headers.indexOf('ESTADO');
-    var idxMontoTotal = headers.indexOf('MONTO_TOTAL');
+    var idxPlataforma = headers.indexOf('PLATAFORMA');
+    var idxTecnicoId = headers.indexOf('TECNICO_ID');
+    var idxTecnicoNombre = headers.indexOf('TECNICO_NOMBRE');
+    var idxDetalle = headers.indexOf('DETALLE_TRABAJO');
+    var idxPrecio = headers.indexOf('PRECIO_UNITARIO');
     var idxFotos = headers.indexOf('FOTOS_DRIVE_URL');
-    var idxDatosJSON = headers.indexOf('DATOS_JSON');
-    var idxEstadoPago = headers.indexOf('ESTADO_PAGO');
+    var idxEstado = headers.indexOf('ESTADO');
+    var idxFechaPosiblePago = headers.indexOf('FECHA_POSIBLE_PAGO');
+    var idxNotasRevisor = headers.indexOf('NOTAS_REVISOR');
+    var idxLatitud = headers.indexOf('LATITUD');
+    var idxLongitud = headers.indexOf('LONGITUD');
+    var idxFechaRegistro = headers.indexOf('FECHA_REGISTRO');
+    var idxObservaciones = headers.indexOf('OBSERVACIONES');
 
-    // Llenar datos
-    if (idxFolio !== -1) filaData[idxFolio] = folio;
-    if (idxFechaReporte !== -1) filaData[idxFechaReporte] = ahora;
-    if (idxTecnico !== -1) filaData[idxTecnico] = sesion.nombre || sesion.email;
-    if (idxGPS !== -1) filaData[idxGPS] = datos.gps || datos.economico || '';
-    if (idxCliente !== -1) filaData[idxCliente] = datos.cliente || '';
+    // ✅ Verificar columnas necesarias
+    if (idxFolio === -1) {
+      return { ok: false, error: 'La hoja de Bitácora no tiene la columna "FOLIO".' };
+    }
+
+    // ============================================================
+    // 6. LLENAR DATOS DEL REPORTE
+    // ============================================================
     
-    // ✅ TIPO_REVISION queda como "Pendiente" para que el Revisor lo asigne
+    // Datos básicos
+    if (idxFolio !== -1) filaData[idxFolio] = folio;
+    if (idxFechaServicio !== -1) filaData[idxFechaServicio] = datos.fechaServicio || ahora;
+    if (idxEconomico !== -1) filaData[idxEconomico] = economico;
+    if (idxPlacas !== -1) filaData[idxPlacas] = datos.placas || '';
+    if (idxSerieGPS !== -1) filaData[idxSerieGPS] = serieGPS;
+    
+    // ✅ TIPO_REVISION: El Revisor lo asignará desde el panel de Registros
     if (idxTipoRevision !== -1) filaData[idxTipoRevision] = 'Pendiente';
     
-    if (idxObservaciones !== -1) filaData[idxObservaciones] = datos.detalleTrabajo || '';
+    if (idxPlataforma !== -1) filaData[idxPlataforma] = 'SAMSARA';
+    if (idxTecnicoId !== -1) filaData[idxTecnicoId] = sesion.usuarioId;
+    if (idxTecnicoNombre !== -1) filaData[idxTecnicoNombre] = sesion.nombre;
+    if (idxDetalle !== -1) filaData[idxDetalle] = datos.detalleTrabajo || '';
+    if (idxObservaciones !== -1) filaData[idxObservaciones] = datos.observaciones || '';
     
-    // ✅ ESTADO: "Borrador" o "Listo para pago" según el caso
-    var estado = datos.esBorrador ? 'Borrador' : 'Listo para pago';
+    // ✅ PRECIO: El Revisor lo asignará al seleccionar el tipo de servicio
+    if (idxPrecio !== -1) filaData[idxPrecio] = 0;
+    
+    if (idxFotos !== -1) filaData[idxFotos] = folderUrl;
+    
+    // ✅ ESTADO: "Borrador" o "Listo para pago"
+    var esBorrador = datos.esBorrador === true || datos.esBorrador === 'true';
+    var estado = esBorrador ? 'Borrador' : 'Listo para pago';
     if (idxEstado !== -1) filaData[idxEstado] = estado;
     
-    if (idxMontoTotal !== -1) filaData[idxMontoTotal] = 0; // El Revisor asignará el precio
-    if (idxFotos !== -1) filaData[idxFotos] = folderUrl;
-    if (idxDatosJSON !== -1) filaData[idxDatosJSON] = JSON.stringify(datos);
-    if (idxEstadoPago !== -1) filaData[idxEstadoPago] = 'Pendiente';
+    // Fechas y ubicación
+    if (idxFechaPosiblePago !== -1) filaData[idxFechaPosiblePago] = datos.fechaPosiblePago || null;
+    if (idxNotasRevisor !== -1) filaData[idxNotasRevisor] = '';
+    if (idxLatitud !== -1) filaData[idxLatitud] = latitud;
+    if (idxLongitud !== -1) filaData[idxLongitud] = longitud;
+    if (idxFechaRegistro !== -1) filaData[idxFechaRegistro] = ahora;
 
-    // Guardar en Bitácora
+    // ============================================================
+    // 7. GUARDAR EN BITÁCORA
+    // ============================================================
+    
     var nuevaFila = sheet.getLastRow() + 1;
     sheet.getRange(nuevaFila, 1, 1, filaData.length).setValues([filaData]);
 
-    console.log('📋 Reporte creado:', folio, 'Estado:', estado);
+    console.log('✅ Reporte creado:', folio);
+    console.log('   Estado:', estado);
+    console.log('   Técnico:', sesion.nombre);
+    console.log('   Vehículo:', economico);
+    if (serieGPS) console.log('   Serie GPS:', serieGPS);
 
-    // ✅ NOTIFICACIÓN AL REVISOR
-    _crearNotificacion(
-      'REVISOR', // o a todos los revisores
-      'NUEVO_REPORTE',
-      '📝 Nuevo reporte ' + folio + ' de ' + sesion.nombre + ' espera revisión.',
-      folio,
-      '#panel-registros'
-    );
+    // ============================================================
+    // 8. CREAR NOTIFICACIONES
+    // ============================================================
+    
+    try {
+      // Notificar al Revisor/Admin
+      _crearNotificacion(
+        'ADMIN',
+        'NUEVO_REPORTE',
+        '📝 Nuevo reporte ' + folio + ' de ' + sesion.nombre + ' espera revisión.',
+        folio,
+        '#panel-registros'
+      );
+      
+      // Notificar al técnico que creó el reporte
+      _crearNotificacion(
+        sesion.usuarioId,
+        'REPORTE_CREADO',
+        '📝 Reporte ' + folio + ' creado exitosamente.',
+        folio,
+        '#panel-mis-registros'
+      );
+    } catch (notifError) {
+      console.warn('⚠️ Error al crear notificaciones:', notifError.message);
+    }
 
+    // ============================================================
+    // 9. RETORNAR RESULTADO
+    // ============================================================
+    
     return {
       ok: true,
       folio: folio,
       folderUrl: folderUrl,
-      mensaje: 'Reporte creado exitosamente',
-      estado: estado
+      estado: estado,
+      mensaje: 'Reporte ' + folio + ' creado exitosamente',
+      timestamp: ahora.toISOString()
     };
 
   } catch (err) {
+    // ============================================================
+    // 10. MANEJO DE ERRORES
+    // ============================================================
+    
     console.error('❌ Error en recibirReporteMejorado:', err);
-    return { ok: false, error: 'Error al procesar el reporte: ' + err.message };
+    console.error('Stack:', err.stack);
+
+    return {
+      ok: false,
+      error: 'Error al procesar el reporte: ' + err.message,
+      timestamp: new Date().toISOString()
+    };
   }
 }
 
@@ -2333,14 +2504,30 @@ function _actualizarEstadoGPS(serieGPS, economico) {
     
     var fechaActual = new Date();
     var valorColumna8 = datos[filaEncontrada - 1][7] || '';
+    var valorColumna11 = datos[filaEncontrada - 1][11] || ''; // OBSERVACIONES
 
-    // Escritura en bloque de la fila (Columnas 5 a 9)
-    sheet.getRange(filaEncontrada, 5, 1, 5).setValues([[
-      'Instalado',          // Columna 5 - ESTADO
-      economicoStr,         // Columna 6 - ECONOMICO_ASIGNADO
-      fechaActual,          // Columna 7 - FECHA_INSTALACION
-      valorColumna8,        // Columna 8 - TICKET_GARANTIA (se mantiene)
-      fechaActual           // Columna 9 - ULTIMA_ACTUALIZACION
+    // ✅ CORRECCIÓN: Mapeo correcto de columnas según tu estructura
+    // Columna A (0): SERIE_GPS
+    // Columna B (1): TIPO_EQUIPO
+    // Columna C (2): MODELO
+    // Columna D (3): IMEI
+    // Columna E (4): ESTADO → 'Instalado'
+    // Columna F (5): ECONOMICO_ASIGNADO → economicoStr
+    // Columna G (6): FECHA_INSTALACION → fechaActual
+    // Columna H (7): TICKET_GARANTIA → se mantiene
+    // Columna I (8): FECHA_GARANTIA → se mantiene
+    // Columna J (9): ULTIMA_ACTUALIZACION → fechaActual
+    // Columna K (10): OBSERVACIONES → se mantiene
+    // Columna L (11): TIPO_UNIDAD → se mantiene
+
+    // Escritura en bloque de la fila (Columnas 5 a 10 = E a J)
+    sheet.getRange(filaEncontrada, 5, 1, 6).setValues([[
+      'Instalado',          // Columna E (5) - ESTADO
+      economicoStr,         // Columna F (6) - ECONOMICO_ASIGNADO
+      fechaActual,          // Columna G (7) - FECHA_INSTALACION
+      valorColumna8,        // Columna H (8) - TICKET_GARANTIA (se mantiene)
+      valorColumna11,       // Columna I (9) - FECHA_GARANTIA (se mantiene)
+      fechaActual           // Columna J (10) - ULTIMA_ACTUALIZACION
     ]]);
 
     console.log('✅ Serie INSTALADA exitosamente:', serieGPS);
@@ -8168,5 +8355,133 @@ function obtenerTicketPorId(token, ticketId) {
   } catch (err) {
     console.error('❌ Error en obtenerTicketPorId:', err);
     return { ok: false, error: 'Error al obtener ticket: ' + err.message };
+  }
+}
+/**
+ * Verifica si un vehículo ya tiene equipos GPS instalados
+ * @param {string} economico - Número económico del vehículo
+ * @returns {Object} { gateway: string|null, camara: string|null }
+ */
+function _verificarEquiposVehiculo(economico) {
+  try {
+    var sheet = SHEETS.INVENTARIO();
+    if (!sheet) return { gateway: null, camara: null };
+
+    var datos = sheet.getDataRange().getValues();
+    var resultado = { gateway: null, camara: null };
+
+    for (var i = 1; i < datos.length; i++) {
+      var estado = datos[i][4] || '';
+      var economicoAsignado = datos[i][5] || '';
+      var tipo = datos[i][1] || '';
+
+      if (economicoAsignado.toString().trim() === economico.toString().trim() && 
+          estado === 'Instalado') {
+        var serie = datos[i][0] || '';
+        var tipoStr = tipo.toString().toUpperCase();
+        if (tipoStr.indexOf('GATEWAY') !== -1 || tipoStr.indexOf('VG') !== -1) {
+          resultado.gateway = serie;
+        } else if (tipoStr.indexOf('CAMARA') !== -1 || tipoStr.indexOf('CM') !== -1) {
+          resultado.camara = serie;
+        }
+      }
+    }
+    return resultado;
+  } catch (err) {
+    console.error('❌ Error en _verificarEquiposVehiculo:', err);
+    return { gateway: null, camara: null };
+  }
+}
+/**
+ * Desinstala un GPS del inventario (cambia a Disponible)
+ * @param {string} serieGPS - Serie del GPS a desinstalar
+ * @returns {Object} { ok: boolean, error: string|null, mensaje: string }
+ */
+function _actualizarEstadoGPSDesinstalacion(serieGPS) {
+  try {
+    var sheet = SHEETS.INVENTARIO();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja INVENTARIO.' };
+    }
+
+    if (!serieGPS || serieGPS.toString().trim() === '') {
+      return { ok: false, error: 'La serie GPS provista está vacía.' };
+    }
+
+    var serieBusquedaClean = serieGPS.toString()
+      .toUpperCase()
+      .replace(/[-_\s]/g, '')
+      .trim();
+
+    var datos = sheet.getDataRange().getValues();
+    var encontrado = false;
+    var filaEncontrada = -1;
+
+    for (var i = 1; i < datos.length; i++) {
+      var serieCeldaRaw = datos[i][0];
+      if (!serieCeldaRaw) continue;
+
+      var serieCeldaClean = serieCeldaRaw.toString()
+        .toUpperCase()
+        .replace(/[-_\s]/g, '')
+        .trim();
+
+      if (serieCeldaClean === serieBusquedaClean) {
+        filaEncontrada = i + 1;
+        encontrado = true;
+        break;
+      }
+    }
+
+    if (!encontrado) {
+      return { ok: false, error: 'La serie no fue hallada en el inventario.' };
+    }
+
+    // ✅ Actualizar a Disponible
+    var fechaActual = new Date();
+    sheet.getRange(filaEncontrada, 5, 1, 6).setValues([[
+      'Disponible',        // Columna E - ESTADO
+      '',                  // Columna F - ECONOMICO_ASIGNADO (vacío)
+      '',                  // Columna G - FECHA_INSTALACION (vacío)
+      '',                  // Columna H - TICKET_GARANTIA (vacío)
+      '',                  // Columna I - FECHA_GARANTIA (vacío)
+      fechaActual          // Columna J - ULTIMA_ACTUALIZACION
+    ]]);
+
+    console.log('✅ Serie DESINSTALADA:', serieGPS);
+    return { ok: true, mensaje: 'GPS desinstalado correctamente' };
+
+  } catch (err) {
+    console.error('❌ Error en _actualizarEstadoGPSDesinstalacion:', err);
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Reemplaza un GPS en el inventario (desinstala uno e instala otro)
+ * @param {string} serieVieja - Serie del GPS a retirar
+ * @param {string} serieNueva - Serie del GPS a instalar
+ * @param {string} economico - Número económico del vehículo
+ * @returns {Object} { ok: boolean, error: string|null, mensaje: string }
+ */
+function _actualizarEstadoGPSReemplazo(serieVieja, serieNueva, economico) {
+  try {
+    // 1. Desinstalar el equipo viejo
+    var resultadoDesinstalacion = _actualizarEstadoGPSDesinstalacion(serieVieja);
+    if (!resultadoDesinstalacion.ok) {
+      return { ok: false, error: 'Error al desinstalar: ' + resultadoDesinstalacion.error };
+    }
+
+    // 2. Instalar el equipo nuevo
+    var resultadoInstalacion = _actualizarEstadoGPS(serieNueva, economico);
+    if (!resultadoInstalacion.ok) {
+      return { ok: false, error: 'Error al instalar: ' + resultadoInstalacion.error };
+    }
+
+    console.log('✅ Reemplazo completado:', serieVieja, '→', serieNueva, 'en', economico);
+    return { ok: true, mensaje: 'Reemplazo completado' };
+
+  } catch (err) {
+    console.error('❌ Error en _actualizarEstadoGPSReemplazo:', err);
+    return { ok: false, error: err.message };
   }
 }
