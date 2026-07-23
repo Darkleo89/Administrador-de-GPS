@@ -2109,3 +2109,4 @@ function testConfigurarProtecciones() {
   const resultado = configurarProtecciones(hojas);
   console.log('Resultado:', resultado ? '✅ Éxito' : '❌ Falló');
 }
+

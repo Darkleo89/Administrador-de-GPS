@@ -2591,10 +2591,10 @@ function obtenerTiposEquipoPorCategoria(token, categoria) {
   return { ok: true, tipos: filtrados };
 }
 /**
- * Obtiene todos los dispositivos instalados en un vehículo (Versión Optimizada)
+ * Obtiene los dispositivos instalados en un vehículo
  * @param {string} token - Token de sesión
- * @param {string} economico - ID del vehículo (ej. G-361)
- * @returns {Object} { ok: boolean, gateway, camara, accesorios }
+ * @param {string} economico - Número económico del vehículo
+ * @returns {Object} { ok, gateway, camara, accesorios }
  */
 function obtenerDispositivosPorEconomico(token, economico) {
   var sesionResp = validarSesion(token);
@@ -2631,19 +2631,22 @@ function obtenerDispositivosPorEconomico(token, economico) {
         var economicoAsignadoStr = economicoAsignado.toString().toUpperCase().trim();
         var estadoStr = estado.toString().toUpperCase().trim();
 
-        if (economicoAsignadoStr === economicoStr && estadoStr === 'INSTALADO') {
+        // ✅ CAMBIO 1: Incluir "GARANTÍA" junto con "INSTALADO"
+        if (economicoAsignadoStr === economicoStr && (estadoStr === 'INSTALADO' || estadoStr === 'GARANTÍA')) {
           var tipoStr = tipo.toString().toUpperCase();
 
           if (tipoStr.indexOf('GATEWAY') !== -1 || tipoStr.indexOf('VG') !== -1) {
             resultado.gateway = {
               serie: (serie || '').toString(),
-              tipo: tipo.toString()
+              tipo: tipo.toString(),
+              estado: estado.toString() // ✅ CAMBIO 2: Añadir estado para que el frontend lo muestre
             };
             console.log('✅ Gateway encontrado:', resultado.gateway);
           } else if (tipoStr.indexOf('CAMARA') !== -1 || tipoStr.indexOf('CM') !== -1) {
             resultado.camara = {
               serie: (serie || '').toString(),
-              tipo: tipo.toString()
+              tipo: tipo.toString(),
+              estado: estado.toString() // ✅ CAMBIO 2: Añadir estado para que el frontend lo muestre
             };
             console.log('✅ Cámara encontrada:', resultado.camara);
           }
