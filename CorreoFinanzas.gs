@@ -6,22 +6,27 @@
 /**
  * Envía el PDF del reporte por correo a todos los destinatarios
  * definidos en el parámetro CORREOS_DESTINO de la Sección C.
+ * @param {Object} registro - Datos del registro
+ * @param {Blob} pdfBlob - Blob del PDF
+ * @param {string} pdfUrl - URL del PDF en Drive
  */
 function _enviarCorreoFinanzas(registro, pdfBlob, pdfUrl) {
-  const params = _leerParams();
-  const destinatarios = _parsearCorreos(params['CORREOS_DESTINO'] || '');
+  try {
+    const params = _leerParams();
+    const destinatarios = _parsearCorreos(params['CORREOS_DESTINO'] || '');
 
-  if (destinatarios.length === 0) {
-    console.warn('No hay destinatarios configurados en CORREOS_DESTINO.');
-    return;
-  }
+    if (destinatarios.length === 0) {
+      console.warn('⚠️ No hay destinatarios configurados en CORREOS_DESTINO.');
+      return;
+    }
 
-  const fecha  = _formatearFecha(registro.FECHA_SERVICIO);
-  const precio = Number(registro.PRECIO_UNITARIO || 0);
-  const total  = precio * 1.16;
-  const asunto = `[Fleet Manager] Orden de Servicio ${registro.FOLIO} — ${registro.TECNICO_NOMBRE}`;
+    // ✅ Usar _formatearFecha desde code.gs (ya unificada)
+    const fecha = _formatearFecha(registro.FECHA_SERVICIO);
+    const precio = Number(registro.PRECIO_UNITARIO || 0);
+    const total = precio * 1.16;
+    const asunto = `[Fleet Manager] Orden de Servicio ${registro.FOLIO} — ${registro.TECNICO_NOMBRE}`;
 
-  const cuerpoHtml = `
+    const cuerpoHtml = `
 <!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"></head>
@@ -121,29 +126,83 @@ function _enviarCorreoFinanzas(registro, pdfBlob, pdfUrl) {
 </body>
 </html>`;
 
-  // Enviar a cada destinatario
-  destinatarios.forEach(correo => {
-    try {
-      GmailApp.sendEmail(correo, asunto, '', {
-        htmlBody    : cuerpoHtml,
-        attachments : [pdfBlob],
-        name        : 'Fleet Manager · Notificaciones',
-      });
-    } catch (err) {
-      console.error('Error enviando a ' + correo + ':', err.message);
-    }
-  });
+    // ✅ ENVIAR A CADA DESTINATARIO CON MANEJO DE ERRORES
+    var errores = [];
+    var enviados = 0;
+    
+    destinatarios.forEach(function(correo) {
+      try {
+        GmailApp.sendEmail(correo, asunto, '', {
+          htmlBody    : cuerpoHtml,
+          attachments : [pdfBlob],
+          name        : 'Fleet Manager · Notificaciones',
+        });
+        enviados++;
+        console.log('📧 Correo enviado a:', correo);
+      } catch (err) {
+        console.error('❌ Error enviando a ' + correo + ':', err.message);
+        errores.push(correo + ': ' + err.message);
+      }
+    });
 
-  console.log('Correo enviado a: ' + destinatarios.join(', '));
+    // ✅ REGISTRAR EN AUDITORÍA
+    if (enviados > 0 && typeof _registrarAuditoria === 'function') {
+      try {
+        _registrarAuditoria(
+          'SISTEMA',
+          'Sistema',
+          'ENVIO_CORREO',
+          'CORREOS',
+          'Correo enviado a ' + enviados + ' destinatarios para folio ' + registro.FOLIO,
+          registro.FOLIO,
+          '',
+          ''
+        );
+      } catch (auditErr) {
+        console.warn('⚠️ Error al registrar auditoría:', auditErr.message);
+      }
+    }
+
+    if (errores.length > 0) {
+      console.warn('⚠️ Errores en envío de correos:', errores.join(', '));
+    }
+
+    console.log('📧 Resumen: ' + enviados + ' enviados, ' + errores.length + ' errores');
+    
+    return {
+      success: true,
+      enviados: enviados,
+      errores: errores,
+      total: destinatarios.length
+    };
+
+  } catch (err) {
+    console.error('❌ Error en _enviarCorreoFinanzas:', err);
+    return {
+      success: false,
+      error: err.message
+    };
+  }
 }
 
 /**
  * Parsea el campo CORREOS_DESTINO separado por comas.
  * Limpia espacios y filtra entradas vacías o inválidas.
+ * ✅ Validación mejorada
+ * @param {string} cadena - Cadena de correos separados por comas
+ * @returns {Array} - Array de correos válidos
  */
 function _parsearCorreos(cadena) {
+  if (!cadena || cadena.toString().trim() === '') {
+    return [];
+  }
+  
   return cadena
+    .toString()
     .split(',')
-    .map(c => c.trim())
-    .filter(c => c.includes('@'));
+    .map(function(c) { return c.trim(); })
+    .filter(function(c) { 
+      // ✅ Validación más robusta
+      return c.length > 5 && c.includes('@') && c.includes('.');
+    });
 }
