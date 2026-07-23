@@ -272,9 +272,18 @@ function _escribirParam(clave, valor) {
   for (var i = 1; i < datos.length; i++) {
     if (datos[i][0].toString() === clave) {
       sheet.getRange(i + 1, 2).setValue(valor);
+      // ✅ AGREGADO: Actualizar fecha de modificación
+      sheet.getRange(i + 1, 4).setValue(new Date());
       return;
     }
   }
+
+  // ✅ AGREGADO: Si no existe la clave, crearla
+  const nuevaFila = sheet.getLastRow() + 1;
+  sheet.getRange(nuevaFila, 1).setValue(clave);
+  sheet.getRange(nuevaFila, 2).setValue(valor);
+  sheet.getRange(nuevaFila, 4).setValue(new Date());
+  console.log('✅ Nuevo parámetro creado:', clave, '=', valor);
 }
 
 
@@ -760,8 +769,37 @@ function _leerPrecio(tipoRevision) {
  */
 function _subirFotosDrive(folio, archivos) {
   const params = _leerParams();
-  const folderId = params['DRIVE_FOLDER_ID'];
-  const rootFolder = DriveApp.getFolderById(folderId);
+  let folderId = params['DRIVE_FOLDER_ID'];
+  
+  // ✅ VALIDACIÓN: Si no hay carpeta configurada, crearla
+  if (!folderId || folderId === '' || folderId === 'root') {
+    // Crear carpeta principal con nombre descriptivo
+    const nombreCarpeta = 'Reportes_Fleet_Manager_' + Utilities.formatDate(
+      new Date(), Session.getScriptTimeZone(), 'yyyyMMdd'
+    );
+    const nuevaCarpeta = DriveApp.createFolder(nombreCarpeta);
+    folderId = nuevaCarpeta.getId();
+    
+    // Guardar el ID en parámetros para futuros usos
+    _escribirParam('DRIVE_FOLDER_ID', folderId);
+    console.log('📁 Carpeta principal creada:', nombreCarpeta, 'ID:', folderId);
+  }
+
+  // ✅ VALIDACIÓN: Intentar obtener la carpeta, si falla crearla
+  let rootFolder;
+  try {
+    rootFolder = DriveApp.getFolderById(folderId);
+  } catch (err) {
+    console.warn('⚠️ No se pudo obtener la carpeta por ID, creando una nueva...', err.message);
+    // Crear nueva carpeta como fallback
+    const nombreCarpeta = 'Reportes_Fleet_Manager_' + Utilities.formatDate(
+      new Date(), Session.getScriptTimeZone(), 'yyyyMMdd'
+    );
+    rootFolder = DriveApp.createFolder(nombreCarpeta);
+    folderId = rootFolder.getId();
+    _escribirParam('DRIVE_FOLDER_ID', folderId);
+    console.log('📁 Carpeta principal recreada:', nombreCarpeta, 'ID:', folderId);
+  }
 
   // Crear subcarpeta para este folio
   const subFolder = rootFolder.createFolder(folio + '_' + Utilities.formatDate(
@@ -1189,92 +1227,89 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
 
     var sheet = SHEETS.BITACORA();
     if (!sheet) {
-      return { ok: false, error: 'No se encontró la hoja de Bitácora.' };
+      return { ok: false, error: 'No se encontró la hoja de Bitácora' };
     }
 
-    var datosBitacora = sheet.getDataRange().getValues();
-    var headers = datosBitacora[0];
+    // ✅ GENERAR FOLIO
+    var folio = generarFolio();
 
-    var idxFolio = headers.indexOf('FOLIO');
-    var idxEstado = headers.indexOf('ESTADO');
-    var idxFotosUrl = headers.indexOf('FOTOS_DRIVE_URL');
-
-    if (idxFolio === -1 || idxEstado === -1) {
-      console.error('❌ Columnas estructurales no encontradas en la Bitácora:', { idxFolio, idxEstado });
-      return { ok: false, error: 'Estructura de Bitácora inválida. Contacte al administrador.' };
-    }
-
-    var folio = datos.folioEdicion || null;
-    var filaDestino = -1;
+    // ✅ SUBIR FOTOS
     var folderUrl = '';
-
-    if (folio) {
-      var folioBusqueda = folio.toString().toUpperCase().trim();
-      for (var k = 1; k < datosBitacora.length; k++) {
-        if ((datosBitacora[k][idxFolio] || '').toString().toUpperCase().trim() === folioBusqueda) {
-          filaDestino = k + 1;
-          folderUrl = datosBitacora[k][idxFotosUrl] || '';
-          break;
-        }
+    if (archivos && archivos.length > 0) {
+      try {
+        folderUrl = _subirFotosDrive(folio, archivos);
+      } catch (fotoError) {
+        console.warn('⚠️ Error al subir fotos:', fotoError.message);
+        folderUrl = '';
       }
     }
 
-    if (filaDestino === -1) {
-      folio = generarFolio();
-    }
+    // ✅ PREPARAR DATOS PARA BITÁCORA
+    // El tipo de servicio se deja como "Pendiente" o vacío para que el Revisor lo asigne
+    var headers = sheet.getDataRange().getValues()[0];
+    var filaData = new Array(headers.length).fill('');
 
-    var tipoServicio = (datos.tipoServicio || 'instalacion').toString().toLowerCase().trim();
+    // Mapear índices
+    var idxFolio = headers.indexOf('FOLIO');
+    var idxFechaReporte = headers.indexOf('FECHA_REPORTE');
+    var idxTecnico = headers.indexOf('TECNICO');
+    var idxGPS = headers.indexOf('GPS');
+    var idxCliente = headers.indexOf('CLIENTE');
+    var idxTipoRevision = headers.indexOf('TIPO_REVISION');
+    var idxObservaciones = headers.indexOf('OBSERVACIONES');
+    var idxEstado = headers.indexOf('ESTADO');
+    var idxMontoTotal = headers.indexOf('MONTO_TOTAL');
+    var idxFotos = headers.indexOf('FOTOS_DRIVE_URL');
+    var idxDatosJSON = headers.indexOf('DATOS_JSON');
+    var idxEstadoPago = headers.indexOf('ESTADO_PAGO');
+
+    // Llenar datos
+    if (idxFolio !== -1) filaData[idxFolio] = folio;
+    if (idxFechaReporte !== -1) filaData[idxFechaReporte] = ahora;
+    if (idxTecnico !== -1) filaData[idxTecnico] = sesion.nombre || sesion.email;
+    if (idxGPS !== -1) filaData[idxGPS] = datos.gps || datos.economico || '';
+    if (idxCliente !== -1) filaData[idxCliente] = datos.cliente || '';
+    
+    // ✅ TIPO_REVISION queda como "Pendiente" para que el Revisor lo asigne
+    if (idxTipoRevision !== -1) filaData[idxTipoRevision] = 'Pendiente';
+    
+    if (idxObservaciones !== -1) filaData[idxObservaciones] = datos.detalleTrabajo || '';
+    
+    // ✅ ESTADO: "Borrador" o "Listo para pago" según el caso
     var estado = datos.esBorrador ? 'Borrador' : 'Listo para pago';
+    if (idxEstado !== -1) filaData[idxEstado] = estado;
+    
+    if (idxMontoTotal !== -1) filaData[idxMontoTotal] = 0; // El Revisor asignará el precio
+    if (idxFotos !== -1) filaData[idxFotos] = folderUrl;
+    if (idxDatosJSON !== -1) filaData[idxDatosJSON] = JSON.stringify(datos);
+    if (idxEstadoPago !== -1) filaData[idxEstadoPago] = 'Pendiente';
 
-    var gateway = datos.gateway || '';
-    var camara = datos.camara || '';
-    var accesorios = datos.accesorios || {};
-    var detalleTrabajo = datos.detalleTrabajo || '';
+    // Guardar en Bitácora
+    var nuevaFila = sheet.getLastRow() + 1;
+    sheet.getRange(nuevaFila, 1, 1, filaData.length).setValues([filaData]);
 
-    console.log('📋 Procesando Folio [' + folio + '] Tipo:', tipoServicio, 'Estado asignado:', estado);
+    console.log('📋 Reporte creado:', folio, 'Estado:', estado);
 
-    // ============================================================
-    // CASE 1. DESINSTALACIÓN
-    // ============================================================
-    if (tipoServicio === 'desinstalacion') {
-      // ... código de desinstalación (NO usa _anexarFotosACarpetaExistente) ...
-    }
+    // ✅ NOTIFICACIÓN AL REVISOR
+    _crearNotificacion(
+      'REVISOR', // o a todos los revisores
+      'NUEVO_REPORTE',
+      '📝 Nuevo reporte ' + folio + ' de ' + sesion.nombre + ' espera revisión.',
+      folio,
+      '#panel-registros'
+    );
 
-    // ============================================================
-    // CASE 2. INSTALACIÓN / REEMPLAZO
-    // ============================================================
-    if (tipoServicio === 'instalacion' || tipoServicio === 'reemplazo') {
-      // ✅ USA _anexarFotosACarpetaExistente() aquí:
-      if (archivos && archivos.length > 0) {
-        if (filaDestino === -1 || folderUrl === '') {
-          folderUrl = _subirFotosDrive(folio, archivos);
-        } else {
-          _anexarFotosACarpetaExistente(folderUrl, archivos); // ⚠️ LLAMA A ESTA FUNCIÓN
-        }
-      }
-      // ... resto del código ...
-    }
-
-    // ============================================================
-    // CASE 3. REVISIÓN / DIAGNÓSTICO
-    // ============================================================
-    if (tipoServicio === 'revision') {
-      // ✅ USA _anexarFotosACarpetaExistente() aquí también:
-      if (archivos && archivos.length > 0) {
-        if (filaDestino === -1 || folderUrl === '') {
-          folderUrl = _subirFotosDrive(folio, archivos);
-        } else {
-          _anexarFotosACarpetaExistente(folderUrl, archivos); // ⚠️ LLAMA A ESTA FUNCIÓN
-        }
-      }
-      // ... resto del código ...
-    }
-
-    return { ok: false, error: 'Tipo de servicio no reconocido en el sistema: ' + tipoServicio };
+    return {
+      ok: true,
+      folio: folio,
+      folderUrl: folderUrl,
+      mensaje: 'Reporte creado exitosamente',
+      estado: estado
+    };
 
   } catch (err) {
     console.error('❌ Error en recibirReporteMejorado:', err);
-    return { ok: false, error: 'Error al procesar el reporte en la Bitácora: ' + err.message };
+    return { ok: false, error: 'Error al procesar el reporte: ' + err.message };
   }
 }
 
