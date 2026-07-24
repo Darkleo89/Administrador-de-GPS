@@ -1169,8 +1169,34 @@ function enviarReporteConUbicacion() {
     var gateway = document.getElementById('serie-gateway') ? document.getElementById('serie-gateway').value.trim() : '';
     var camara = document.getElementById('serie-camara') ? document.getElementById('serie-camara').value.trim() : '';
     var esBorrador = document.getElementById('chk-borrador') ? document.getElementById('chk-borrador').checked : false;
+    
+    // ✅ CORRECCIÓN: Capturar accesorios con el nombre correcto
     var accesorios = {};
-    document.querySelectorAll('#accesorios-container input[type="checkbox"]:checked').forEach(chk => accesorios[chk.value] = true);
+    var container = document.getElementById('accesorios-container');
+    if (container) {
+      var checkboxes = container.querySelectorAll('input[type="checkbox"]');
+      checkboxes.forEach(function(chk) {
+        // Obtener el label asociado al checkbox
+        var label = container.querySelector('label[for="' + chk.id + '"]');
+        if (label) {
+          // Extraer el nombre del accesorio (sin el texto extra como "(Stock: X/Y)")
+          var nombreCompleto = label.textContent.trim();
+          // Limpiar: eliminar paréntesis y su contenido
+          var nombreAccesorio = nombreCompleto.replace(/\(.*?\)/g, '').trim();
+          // Si el nombre está vacío, usar el value como fallback
+          if (!nombreAccesorio) {
+            nombreAccesorio = chk.value;
+          }
+          accesorios[nombreAccesorio] = chk.checked;
+          console.log('📌 Accesorio capturado:', nombreAccesorio, '=', chk.checked);
+        } else {
+          // Fallback: usar el value del checkbox
+          accesorios[chk.value] = chk.checked;
+          console.log('📌 Accesorio capturado (fallback):', chk.value, '=', chk.checked);
+        }
+      });
+    }
+    console.log('📌 Accesorios capturados:', accesorios);
 
     // ✅ VALIDACIÓN DE CAMPOS OBLIGATORIOS
     if (!economico || !placas || detalle.length < 20) {
@@ -1211,17 +1237,17 @@ function enviarReporteConUbicacion() {
 
     // ✅ PREPARAR DATOS PARA ENVIAR
     var datos = { 
-      economico, 
-      placas, 
-      serieGPS: gateway, 
-      detalleTrabajo: detalle, 
-      plataforma: 'SAMSARA', 
-      fechaServicio: fecha, 
-      esBorrador, 
-      tipoServicio: tipo, 
-      gateway, 
-      camara, 
-      accesorios,
+      economico: economico,
+      placas: placas,
+      serieGPS: gateway,
+      detalleTrabajo: detalle,
+      plataforma: 'SAMSARA',
+      fechaServicio: fecha,
+      esBorrador: esBorrador,
+      tipoServicio: tipo,
+      gateway: gateway,
+      camara: camara,
+      accesorios: accesorios, // ✅ ACCESORIOS CORRECTAMENTE CAPTURADOS
       // ✅ Campos para Revisión y Desinstalación
       camaraVieja: camaraVieja,
       camaraNueva: camaraNueva,
@@ -1231,7 +1257,7 @@ function enviarReporteConUbicacion() {
       soloDiagnostico: soloDiagnostico
     };
 
-    console.log('📌 Datos a enviar:', datos);
+    console.log('📌 Datos a enviar:', JSON.stringify(datos, null, 2));
 
     var btnEl = document.getElementById('btn-enviar'),
       spnEl = document.getElementById('enviar-spinner'),

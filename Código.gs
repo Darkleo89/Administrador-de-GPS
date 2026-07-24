@@ -8682,15 +8682,18 @@ function _asignarAccesorioAVehiculo(accesorioNombre, economico) {
     if (!sheet) return { ok: false, error: 'No se encontró la hoja de Accesorios' };
 
     var datos = sheet.getDataRange().getValues();
-    var encontrado = false;
 
     for (var i = 1; i < datos.length; i++) {
-      var nombre = datos[i][0] || '';
-      if (nombre.toString().trim() === accesorioNombre) {
+      var nombre = datos[i][0] || ''; // ACCESORIO (ej: BTN 2.0)
+      var tipo = datos[i][1] || '';   // TIPO (ej: Botón 2.0)
+      
+      // ✅ Buscar por nombre O por tipo
+      if (nombre.toString().trim() === accesorioNombre || 
+          tipo.toString().trim() === accesorioNombre) {
+        
         var economicoAsignado = datos[i][5] || '';
         var lista = economicoAsignado ? economicoAsignado.split(',').map(function(e) { return e.trim(); }) : [];
         
-        // Agregar económico si no está ya
         if (lista.indexOf(economico) === -1) {
           lista.push(economico);
           var nuevoValor = lista.join(', ');
@@ -8698,17 +8701,17 @@ function _asignarAccesorioAVehiculo(accesorioNombre, economico) {
           sheet.getRange(i + 1, 4).setValue(lista.length); // ASIGNADOS
           sheet.getRange(i + 1, 5).setValue((datos[i][2] || 0) - lista.length); // DISPONIBLES
           console.log('✅ Accesorio asignado:', accesorioNombre, 'a', economico);
-          encontrado = true;
+          console.log('   Lista actualizada:', nuevoValor);
+          return { ok: true };
+        } else {
+          console.log('ℹ️ Accesorio ya asignado:', accesorioNombre, 'a', economico);
+          return { ok: true };
         }
-        break;
       }
     }
 
-    if (!encontrado) {
-      console.warn('⚠️ Accesorio no encontrado:', accesorioNombre);
-    }
-
-    return { ok: true };
+    console.warn('⚠️ Accesorio no encontrado para asignar:', accesorioNombre);
+    return { ok: false, error: 'Accesorio no encontrado' };
 
   } catch (err) {
     console.error('❌ Error en _asignarAccesorioAVehiculo:', err);
@@ -8727,23 +8730,32 @@ function _desasignarAccesorioDeVehiculo(accesorioNombre, economico) {
     var datos = sheet.getDataRange().getValues();
 
     for (var i = 1; i < datos.length; i++) {
-      var nombre = datos[i][0] || '';
-      if (nombre.toString().trim() === accesorioNombre) {
+      var nombre = datos[i][0] || ''; // ACCESORIO (ej: BTN 2.0)
+      var tipo = datos[i][1] || '';   // TIPO (ej: Botón 2.0)
+      
+      // ✅ Buscar por nombre O por tipo
+      if (nombre.toString().trim() === accesorioNombre || 
+          tipo.toString().trim() === accesorioNombre) {
+        
         var economicoAsignado = datos[i][5] || '';
         var lista = economicoAsignado ? economicoAsignado.split(',').map(function(e) { return e.trim(); }) : [];
         
-        // Quitar el económico de la lista
+        // ✅ Quitar el económico de la lista
         var nuevaLista = lista.filter(function(e) { return e !== economico; });
         var nuevoValor = nuevaLista.join(', ');
+        
         sheet.getRange(i + 1, 6).setValue(nuevoValor); // ECONOMICO_ASIGNADO
         sheet.getRange(i + 1, 4).setValue(nuevaLista.length); // ASIGNADOS
         sheet.getRange(i + 1, 5).setValue((datos[i][2] || 0) - nuevaLista.length); // DISPONIBLES
+        
         console.log('✅ Accesorio desasignado:', accesorioNombre, 'de', economico);
-        break;
+        console.log('   Lista actualizada:', nuevoValor || '(vacío)');
+        return { ok: true };
       }
     }
 
-    return { ok: true };
+    console.warn('⚠️ Accesorio no encontrado para desasignar:', accesorioNombre);
+    return { ok: false, error: 'Accesorio no encontrado' };
 
   } catch (err) {
     console.error('❌ Error en _desasignarAccesorioDeVehiculo:', err);
