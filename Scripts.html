@@ -1152,6 +1152,7 @@ function enviarReporteConUbicacion() {
   var tipoServicio = document.querySelector('input[name="tipoServicio"]:checked');
   var tipo = tipoServicio ? tipoServicio.value : 'instalacion';
 
+  // ✅ Si es instalación, verificar si el vehículo ya tiene equipos
   if (tipo === 'instalacion') {
     verificarEquiposVehiculo(economico).then(resp => {
       if (resp.tieneEquipos) {
@@ -1171,12 +1172,66 @@ function enviarReporteConUbicacion() {
     var accesorios = {};
     document.querySelectorAll('#accesorios-container input[type="checkbox"]:checked').forEach(chk => accesorios[chk.value] = true);
 
+    // ✅ VALIDACIÓN DE CAMPOS OBLIGATORIOS
     if (!economico || !placas || detalle.length < 20) {
       mostrarError(errEl, 'Faltan campos obligatorios o detalle < 20 caracteres.');
       return;
     }
 
-    var datos = { economico, placas, serieGPS: gateway, detalleTrabajo: detalle, plataforma: 'SAMSARA', fechaServicio: fecha, esBorrador, tipoServicio: tipo, gateway, camara, accesorios };
+    // ✅ PARA REVISIÓN: Detectar qué se está haciendo con los equipos
+    var camaraVieja = '';
+    var camaraNueva = '';
+    var gatewayViejo = '';
+    var gatewayNuevo = '';
+    var equipoRetirado = '';
+    var soloDiagnostico = false;
+
+    if (tipo === 'revision') {
+      // ✅ Si hay gateway en el formulario
+      if (gateway) {
+        gatewayNuevo = gateway;
+      }
+      
+      // ✅ Si hay cámara en el formulario
+      if (camara) {
+        camaraNueva = camara;
+      }
+      
+      // ✅ Si no hay gateway ni cámara, es solo diagnóstico
+      if (!gateway && !camara) {
+        soloDiagnostico = true;
+        console.log('ℹ️ Solo diagnóstico, no se afecta inventario.');
+      }
+    }
+
+    // ✅ PARA DESINSTALACIÓN: El gateway es el equipo a retirar
+    if (tipo === 'desinstalacion' && gateway) {
+      equipoRetirado = gateway;
+    }
+
+    // ✅ PREPARAR DATOS PARA ENVIAR
+    var datos = { 
+      economico, 
+      placas, 
+      serieGPS: gateway, 
+      detalleTrabajo: detalle, 
+      plataforma: 'SAMSARA', 
+      fechaServicio: fecha, 
+      esBorrador, 
+      tipoServicio: tipo, 
+      gateway, 
+      camara, 
+      accesorios,
+      // ✅ Campos para Revisión y Desinstalación
+      camaraVieja: camaraVieja,
+      camaraNueva: camaraNueva,
+      gatewayViejo: gatewayViejo,
+      gatewayNuevo: gatewayNuevo,
+      equipoRetirado: equipoRetirado,
+      soloDiagnostico: soloDiagnostico
+    };
+
+    console.log('📌 Datos a enviar:', datos);
 
     var btnEl = document.getElementById('btn-enviar'),
       spnEl = document.getElementById('enviar-spinner'),
@@ -1196,7 +1251,10 @@ function enviarReporteConUbicacion() {
           spnEl.classList.add('d-none');
           icoEl.classList.remove('d-none');
           mostrarProgreso(100);
-          if (!resp.ok) { mostrarError(errEl, resp.error); return; }
+          if (!resp.ok) { 
+            mostrarError(errEl, resp.error); 
+            return; 
+          }
 
           sucEl.innerHTML = `<strong>✅ Reporte enviado correctamente.</strong><br>Folio: <code>${resp.folio}</code><br>` + (ubicacion ? '📍 Con GPS' : '⚠️ Sin GPS');
           sucEl.classList.remove('d-none');
@@ -3878,47 +3936,94 @@ function verificarEquiposVehiculo(economico) {
   });
 }
 
-function validarSerieGPSInventario(serie) {
-  if (_timeoutValidacionSerie) clearTimeout(_timeoutValidacionSerie);
-  if (!serie || serie.length < 10) {
-    var validacion = document.getElementById('serie-validacion');
-    if (validacion) { validacion.innerHTML = '';
-      validacion.className = 'd-block mt-1'; }
-    return;
-  }
+/**
+ * Valida si una serie GPS existe en el inventario y devuelve su tipo
+ * @param {string} token - Token de sesión
+ * @param {string} serie - Serie del GPS a validar (limpia, sin guiones)
+ * @param {string} tipoEquipo - 'gateway' o 'camara'
+ * @returns {Object} { ok, encontrada, tipo, tipoNombre, estado, economico }
+ */
+function validarSerieGPSInventario(token, serie, tipoEquipo) {
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
 
-  _timeoutValidacionSerie = setTimeout(function() {
-    google.script.run
-      .withSuccessHandler(function(resp) {
-        var validacion = document.getElementById('serie-validacion');
-        if (!validacion) return;
+    var sheet = SHEETS.INVENTARIO();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Inventario' };
+    }
 
-        if (resp.disponible) {
-          validacion.innerHTML = '✅ ' + resp.mensaje;
-          validacion.className = 'd-block mt-1 text-success';
-          APP._serieValida = true;
-          APP._serieDisponible = true;
-          APP._serieInfo = resp.detalles || {};
+    var datos = sheet.getDataRange().getValues();
+
+    // Limpiar serie para búsqueda
+    var serieBusqueda = serie.toString().toUpperCase().replace(/[-_\s]/g, '').trim();
+
+    for (var i = 1; i < datos.length; i++) {
+      var serieCelda = datos[i][0] || '';
+      var serieCeldaLimpia = serieCelda.toString().toUpperCase().replace(/[-_\s]/g, '').trim();
+      
+      if (serieCeldaLimpia === serieBusqueda) {
+        var tipo = datos[i][1] || '';        // TIPO_EQUIPO (ej: VG54, CM32)
+        var modelo = datos[i][2] || '';      // MODELO (ej: Samsara VG54)
+        var estado = datos[i][4] || '';      // ESTADO (ej: Disponible, Instalado)
+        var economico = datos[i][5] || '';   // ECONOMICO_ASIGNADO
+
+        // Determinar el nombre del tipo (para mostrar en la interfaz)
+        var tipoNombre = '';
+        var tipoStr = tipo.toString().toUpperCase();
+        
+        // Mapeo de tipos
+        if (tipoStr.indexOf('VG') !== -1) {
+          // Es un Gateway
+          if (tipoStr === 'VG54') tipoNombre = 'Samsara VG54';
+          else if (tipoStr === 'VG55') tipoNombre = 'Samsara VG55';
+          else tipoNombre = 'Samsara ' + tipo;
+        } else if (tipoStr.indexOf('CM') !== -1) {
+          // Es una Cámara
+          if (tipoStr === 'CM32') tipoNombre = 'Samsara CM32';
+          else if (tipoStr === 'CM34') tipoNombre = 'Samsara CM34';
+          else tipoNombre = 'Samsara ' + tipo;
         } else {
-          if (resp.estado === 'instalado') {
-            validacion.innerHTML = '⚠️ ' + resp.mensaje + ' <button class="btn btn-warning btn-sm ms-2" type="button" onclick="prepararReemplazo()">🔄 Reemplazar equipo</button>';
-            validacion.className = 'd-block mt-1 text-warning';
-            APP._serieValida = true;
-            APP._serieDisponible = false;
-            APP._serieInfo = resp.detalles || {};
-            APP._serieInfo.economicoAsignado = resp.detalles?.economico || '';
-          } else {
-            validacion.innerHTML = '❌ ' + resp.mensaje;
-            validacion.className = 'd-block mt-1 text-danger';
-            APP._serieValida = false;
-            APP._serieDisponible = false;
-          }
+          tipoNombre = tipo.toString();
         }
-      })
-      .withFailureHandler(function(err) { console.warn('Error en validación:', err.message); })
-      .validarSerieGPSInventario(APP.token, serie);
-  }, 500);
+
+        // Verificar que coincida con el tipo de equipo solicitado
+        var esGateway = tipoStr.indexOf('VG') !== -1;
+        var esCamara = tipoStr.indexOf('CM') !== -1;
+        
+        if (tipoEquipo === 'gateway' && !esGateway) continue;
+        if (tipoEquipo === 'camara' && !esCamara) continue;
+
+        return {
+          ok: true,
+          encontrada: true,
+          tipo: tipo.toString(),
+          tipoNombre: tipoNombre,
+          modelo: modelo.toString(),
+          estado: estado.toString(),
+          economico: economico.toString()
+        };
+      }
+    }
+
+    // No se encontró la serie
+    return {
+      ok: true,
+      encontrada: false,
+      mensaje: 'Serie no encontrada en el inventario'
+    };
+
+  } catch (err) {
+    console.error('❌ Error en validarSerieGPSInventario:', err);
+    return { ok: false, error: err.message };
+  }
 }
+// ============================================================
+// VALIDAR SERIE GPS EN INVENTARIO
+// ============================================================
+
 
 function prepararReemplazo() {
   _reemplazoSerieNueva = document.getElementById('inp-serie').value.trim();
@@ -4277,64 +4382,104 @@ function instalarBaseDatosWeb() {
 function cargarTiposEquipo() {
   console.log('🔄 Iniciando carga unificada de tipos de equipo...');
 
-  if (!APP.token) { console.warn('⚠️ APP.token es null'); return; }
+  if (!APP.token) {
+    console.warn('⚠️ APP.token es null, reintentando en 1s...');
+    setTimeout(cargarTiposEquipo, 1000);
+    return;
+  }
 
   var selectGateway = document.getElementById('tipo-gateway');
   var selectCamara = document.getElementById('tipo-camara');
   var containerAccesorios = document.getElementById('accesorios-container');
 
-  if (selectGateway) { while (selectGateway.options.length > 1) selectGateway.remove(1); }
-  if (selectCamara) { while (selectCamara.options.length > 1) selectCamara.remove(1); }
-  if (containerAccesorios) containerAccesorios.innerHTML = '<div class="text-muted small">Cargando accesorios...</div>';
+  // Limpiar selects
+  if (selectGateway) {
+    while (selectGateway.options.length > 1) selectGateway.remove(1);
+  }
+  if (selectCamara) {
+    while (selectCamara.options.length > 1) selectCamara.remove(1);
+  }
+  if (containerAccesorios) {
+    containerAccesorios.innerHTML = '<div class="text-muted small">Cargando accesorios...</div>';
+  }
 
+  // ✅ OBTENER TIPOS DE EQUIPO (Gateways y Cámaras)
   google.script.run
     .withSuccessHandler(function(resp) {
-      if (!resp.ok) { console.warn('Error en base de datos de equipos:', resp.error); if (containerAccesorios) containerAccesorios.innerHTML = '❌ Error al cargar'; return; }
-      if (containerAccesorios) containerAccesorios.innerHTML = '';
+      console.log('✅ Respuesta de obtenerTiposEquipo:', resp);
+      
+      if (!resp.ok) {
+        console.warn('❌ Error en base de datos de equipos:', resp.error);
+        if (containerAccesorios) {
+          containerAccesorios.innerHTML = '❌ Error al cargar accesorios';
+        }
+        return;
+      }
 
-      var totalGateways = 0,
-        totalCamaras = 0,
-        totalAccesorios = 0;
+      if (!resp.tipos || resp.tipos.length === 0) {
+        console.warn('⚠️ No se encontraron tipos de equipo');
+        if (containerAccesorios) {
+          containerAccesorios.innerHTML = '⚠️ No hay accesorios configurados';
+        }
+        return;
+      }
 
+      // ✅ Limpiar contenedor de accesorios
+      if (containerAccesorios) {
+        containerAccesorios.innerHTML = '';
+      }
+
+      var totalGateways = 0;
+      var totalCamaras = 0;
+      var totalAccesorios = 0;
+
+      console.log('📌 Procesando', resp.tipos.length, 'tipos de equipo...');
+
+      // ✅ Procesar tipos de equipo (Gateways y Cámaras)
       resp.tipos.forEach(function(t) {
-        var claveUpper = (t.clave || '').toUpperCase();
-        var nombreUpper = (t.nombre || '').toUpperCase();
+        var claveUpper = (t.clave || '').toUpperCase().trim();
+        var nombreUpper = (t.nombre || '').toUpperCase().trim();
 
-        if (claveUpper.indexOf('VG') === 0 || nombreUpper.indexOf('GATEWAY') !== -1) {
+        console.log('   - Procesando:', t.clave, '→', t.nombre);
+
+        // ✅ Detectar Gateway (VG)
+        if (claveUpper.indexOf('VG') === 0) {
           if (selectGateway) {
             var option = document.createElement('option');
             option.value = t.clave;
-            option.textContent = t.nombre + ' (' + t.descripcion + ')';
+            option.textContent = t.nombre + ' (' + (t.descripcion || '') + ')';
             selectGateway.appendChild(option);
             totalGateways++;
+            console.log('      ✅ Gateway agregado:', t.clave);
           }
-        } else if (claveUpper.indexOf('CM') === 0 || nombreUpper.indexOf('CAMARA') !== -1) {
+        }
+        // ✅ Detectar Cámara (CM)
+        else if (claveUpper.indexOf('CM') === 0) {
           if (selectCamara) {
             var option = document.createElement('option');
             option.value = t.clave;
-            option.textContent = t.nombre + ' (' + t.descripcion + ')';
+            option.textContent = t.nombre + ' (' + (t.descripcion || '') + ')';
             selectCamara.appendChild(option);
             totalCamaras++;
-          }
-        } else if (claveUpper.indexOf('ARNES') !== -1 || nombreUpper.indexOf('ARNES') !== -1 ||
-          claveUpper.indexOf('BTN') !== -1 || nombreUpper.indexOf('BOTON') !== -1 ||
-          claveUpper.indexOf('EI') === 0 || nombreUpper.indexOf('CORTE') !== -1) {
-          if (containerAccesorios) {
-            var div = document.createElement('div');
-            div.className = 'form-check form-check-inline mb-2';
-            div.innerHTML = `
-              <input class="form-check-input" type="checkbox" id="chk-${t.clave}" value="${t.clave}">
-              <label class="form-check-label" for="chk-${t.clave}"><strong>${t.nombre}</strong></label>
-              <span class="text-muted small d-block" style="margin-left: 1.5rem;">(${t.descripcion})</span>
-            `;
-            containerAccesorios.appendChild(div);
-            totalAccesorios++;
+            console.log('      ✅ Cámara agregada:', t.clave);
           }
         }
       });
-      console.log('✅ Carga completa:', { gateways: totalGateways, camaras: totalCamaras, accesorios: totalAccesorios });
+
+      // ✅ CARGAR ACCESORIOS DESDE 🔧_Accesorios_Stock
+      cargarAccesoriosDesdeStock(containerAccesorios);
+
+      console.log('✅ Carga completa:');
+      console.log('   Gateways:', totalGateways);
+      console.log('   Cámaras:', totalCamaras);
+
     })
-    .withFailureHandler(function(err) { console.error('Error crítico al conectar con Google Script:', err); if (containerAccesorios) containerAccesorios.innerHTML = '❌ Error de conexión'; })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error crítico al conectar con Google Script:', err);
+      if (containerAccesorios) {
+        containerAccesorios.innerHTML = '❌ Error de conexión: ' + err.message;
+      }
+    })
     .obtenerTiposEquipo(APP.token, null);
 }
 
@@ -4347,7 +4492,109 @@ function obtenerParametros() {
       .obtenerParametrosFrontend(APP.token);
   });
 }
+/**
+ * Carga los accesorios desde la hoja 🔧_Accesorios_Stock
+ * @param {HTMLElement} container - Contenedor donde mostrar los accesorios
+ */
+function cargarAccesoriosDesdeStock(container) {
+  if (!APP.token) {
+    console.warn('⚠️ APP.token no disponible para cargar accesorios');
+    return;
+  }
 
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      console.log('✅ Respuesta de obtenerAccesoriosStock:', resp);
+      
+      if (!resp.ok) {
+        console.warn('⚠️ Error al cargar accesorios desde stock:', resp.error);
+        if (container) {
+          container.innerHTML = '❌ Error al cargar accesorios';
+        }
+        return;
+      }
+
+      if (!resp.accesorios || resp.accesorios.length === 0) {
+        console.warn('⚠️ No hay accesorios en stock');
+        if (container) {
+          container.innerHTML = '⚠️ No hay accesorios configurados';
+        }
+        return;
+      }
+
+      console.log('📌 Procesando', resp.accesorios.length, 'accesorios...');
+
+      // ✅ Limpiar contenedor si está vacío
+      if (container && container.innerHTML === '') {
+        // Ya está limpio
+      }
+
+      var totalAccesorios = 0;
+
+      // ✅ Procesar accesorios
+      resp.accesorios.forEach(function(acc) {
+        if (container) {
+          // Verificar si el accesorio ya existe en el contenedor (evitar duplicados)
+          var existe = false;
+          var checkboxes = container.querySelectorAll('input[type="checkbox"]');
+          for (var i = 0; i < checkboxes.length; i++) {
+            if (checkboxes[i].value === acc.clave) {
+              existe = true;
+              break;
+            }
+          }
+
+          if (!existe) {
+            var div = document.createElement('div');
+            div.className = 'form-check form-check-inline mb-2';
+            div.style.minWidth = '200px';
+            
+            // Verificar si el accesorio está asignado al vehículo actual
+            var economicoActual = document.getElementById('inp-economico')?.value.trim() || '';
+            var asignado = false;
+            if (acc.economicoAsignado && economicoActual) {
+              var asignados = acc.economicoAsignado.split(',').map(function(e) { return e.trim(); });
+              asignado = asignados.indexOf(economicoActual) !== -1;
+            }
+
+            var stockInfo = '';
+            if (acc.stockTotal !== undefined && acc.disponibles !== undefined) {
+              stockInfo = ` <span class="text-muted small">(Stock: ${acc.disponibles}/${acc.stockTotal})</span>`;
+            }
+
+            div.innerHTML = `
+              <input class="form-check-input" type="checkbox" id="chk-${acc.clave}" value="${acc.clave}" ${asignado ? 'checked' : ''}>
+              <label class="form-check-label" for="chk-${acc.clave}">
+                <strong>${acc.nombre}</strong>
+                <span class="text-muted small d-block" style="font-size: 10px;">
+                  ${acc.descripcion || 'Accesorio'} ${stockInfo}
+                  ${asignado ? '<span class="badge bg-success ms-1">Asignado</span>' : ''}
+                </span>
+              </label>
+            `;
+            container.appendChild(div);
+            totalAccesorios++;
+            console.log('      ✅ Accesorio agregado:', acc.clave);
+          }
+        }
+      });
+
+      console.log('   Accesorios:', totalAccesorios);
+
+      // ✅ Si no hay accesorios, mostrar mensaje
+      if (totalAccesorios === 0 && container) {
+        container.innerHTML = '<div class="text-muted small">No hay accesorios configurados</div>';
+      }
+
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al cargar accesorios desde stock:', err);
+      if (container) {
+        container.innerHTML = '❌ Error de conexión: ' + err.message;
+      }
+    })
+    .obtenerAccesoriosStock(APP.token);
+}
 function verificarDiscrepanciaFechas() {
   var fechaInput = document.getElementById('inp-fecha');
   var fechaAdvertencia = document.getElementById('fecha-advertencia');
@@ -9659,7 +9906,117 @@ function guardarTecnicosAutorizados(ticketId) {
     })
     .guardarTecnicosAutorizados(APP.token, ticketId, autorizados);
 }
+// ════════════════════════════════════════════════════════════
+// VALIDACIÓN DE SERIE Y AUTOCOMPLETADO DE TIPO DE EQUIPO
+// ════════════════════════════════════════════════════════════
 
+/**
+ * Valida la serie GPS en el inventario y autocompleta el tipo de equipo
+ * @param {string} serie - Serie del GPS a validar
+ * @param {string} tipoEquipo - 'gateway' o 'camara'
+ */
+function validarYAutocompletarTipo(serie, tipoEquipo) {
+  console.log('🔍 validarYAutocompletarTipo - Serie:', serie, 'Tipo:', tipoEquipo);
+  
+  // Si la serie está vacía o es muy corta, limpiar
+  if (!serie || serie.length < 5) {
+    var validacion = document.getElementById('serie-validacion');
+    if (validacion) {
+      validacion.innerHTML = '';
+      validacion.className = 'd-block mt-1';
+    }
+    
+    // Limpiar el select de tipo correspondiente
+    var selectId = tipoEquipo === 'gateway' ? 'tipo-gateway' : 'tipo-camara';
+    var select = document.getElementById(selectId);
+    if (select) select.value = '';
+    return;
+  }
+
+  // Limpiar serie (quitar guiones y espacios)
+  var serieLimpia = serie.toUpperCase().replace(/[-_\s]/g, '').trim();
+  console.log('   Serie limpia:', serieLimpia);
+
+  // Llamar al backend para validar la serie en el inventario
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      console.log('✅ Respuesta validación:', resp);
+      
+      var validacion = document.getElementById('serie-validacion');
+      
+      if (!resp.ok) {
+        if (validacion) {
+          validacion.innerHTML = '❌ ' + (resp.error || 'Error al validar serie');
+          validacion.className = 'd-block mt-1 text-danger';
+        }
+        return;
+      }
+
+      // ✅ Si la serie existe en el inventario
+      if (resp.encontrada) {
+        // ✅ Actualizar el select de tipo correspondiente
+        var selectId = tipoEquipo === 'gateway' ? 'tipo-gateway' : 'tipo-camara';
+        var select = document.getElementById(selectId);
+        if (select && resp.tipo) {
+          // Buscar la opción que coincida con el tipo
+          var found = false;
+          for (var i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === resp.tipo) {
+              select.selectedIndex = i;
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            // Si no existe la opción, agregarla
+            var option = document.createElement('option');
+            option.value = resp.tipo;
+            option.textContent = resp.tipoNombre || resp.tipo;
+            select.appendChild(option);
+            select.value = resp.tipo;
+          }
+          console.log('✅ Tipo autocompletado:', resp.tipo);
+        }
+
+        // ✅ Mostrar mensaje de éxito con el estado del equipo
+        if (validacion) {
+          var estadoTexto = resp.estado || '';
+          var estadoBadge = '';
+          var estadoColor = '';
+          if (estadoTexto === 'Disponible') {
+            estadoBadge = '🟢';
+            estadoColor = 'text-success';
+          } else if (estadoTexto === 'Instalado') {
+            estadoBadge = '🔵';
+            estadoColor = 'text-primary';
+          } else if (estadoTexto === 'Garantía') {
+            estadoBadge = '🟡';
+            estadoColor = 'text-warning';
+          } else {
+            estadoBadge = '⚪';
+            estadoColor = 'text-secondary';
+          }
+          validacion.innerHTML = `✅ ${resp.tipoNombre || resp.tipo} (${estadoBadge} ${estadoTexto || 'Desconocido'})`;
+          validacion.className = `d-block mt-1 ${estadoColor}`;
+        }
+      } else {
+        // ❌ La serie no existe en el inventario
+        if (validacion) {
+          validacion.innerHTML = '❌ Serie no encontrada en el inventario';
+          validacion.className = 'd-block mt-1 text-danger';
+        }
+      }
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al validar serie:', err);
+      var validacion = document.getElementById('serie-validacion');
+      if (validacion) {
+        validacion.innerHTML = '❌ Error de conexión: ' + err.message;
+        validacion.className = 'd-block mt-1 text-danger';
+      }
+    })
+    .validarSerieGPSInventario(APP.token, serieLimpia, tipoEquipo);
+}
 // Ejecutar
 forzarActualizacionSelects();
 // ════════════════════════════════════════════════════════════

@@ -1269,15 +1269,26 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
     var tipoServicio = datos.tipoServicio || '';
     var serieGPS = datos.serieGPS || datos.gateway || '';
     var economico = datos.economico || '';
+    var camara = datos.camara || '';
+    
+    // ✅ Campos para Revisión
     var camaraVieja = datos.camaraVieja || '';
     var camaraNueva = datos.camaraNueva || '';
+    var gatewayViejo = datos.gatewayViejo || '';
+    var gatewayNuevo = datos.gatewayNuevo || '';
+    var equipoRetirado = datos.equipoRetirado || '';
+    var soloDiagnostico = datos.soloDiagnostico || false;
 
     console.log('📌 PROCESANDO ACTUALIZACIÓN DE INVENTARIO:');
     console.log('   tipoServicio:', tipoServicio);
     console.log('   serieGPS:', serieGPS || 'NO HAY SERIE');
     console.log('   economico:', economico);
+    console.log('   camara:', camara || 'NO HAY');
     console.log('   camaraVieja:', camaraVieja || 'NO HAY');
     console.log('   camaraNueva:', camaraNueva || 'NO HAY');
+    console.log('   gatewayNuevo:', gatewayNuevo || 'NO HAY');
+    console.log('   equipoRetirado:', equipoRetirado || 'NO HAY');
+    console.log('   soloDiagnostico:', soloDiagnostico);
 
     // ============================================================
     // 4.1 INSTALACIÓN
@@ -1290,7 +1301,6 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
           console.warn('⚠️ El vehículo ' + economico + ' ya tiene equipos instalados:');
           if (equiposExistentes.gateway) console.warn('   Gateway:', equiposExistentes.gateway);
           if (equiposExistentes.camara) console.warn('   Cámara:', equiposExistentes.camara);
-          // No bloqueamos, solo advertimos
         }
         
         console.log('📦 Instalando GPS en inventario...');
@@ -1304,43 +1314,108 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
     // ============================================================
     // 4.2 DESINSTALACIÓN
     // ============================================================
-    else if (tipoServicio === 'desinstalacion' && serieGPS) {
-      try {
-        console.log('📦 Desinstalando GPS de inventario...');
-        var resultadoInventario = _actualizarEstadoGPSDesinstalacion(serieGPS);
-        console.log('📦 Resultado desinstalación:', JSON.stringify(resultadoInventario));
-      } catch (invError) {
-        console.warn('⚠️ Error al actualizar inventario (Desinstalación):', invError.message);
+    else if (tipoServicio === 'desinstalacion') {
+      var equipoADesinstalar = equipoRetirado || serieGPS;
+      
+      if (equipoADesinstalar) {
+        try {
+          console.log('📦 Desinstalando GPS de inventario:', equipoADesinstalar);
+          var resultadoInventario = _actualizarEstadoGPSDesinstalacion(equipoADesinstalar);
+          console.log('📦 Resultado desinstalación:', JSON.stringify(resultadoInventario));
+        } catch (invError) {
+          console.warn('⚠️ Error al actualizar inventario (Desinstalación):', invError.message);
+        }
+      } else {
+        console.warn('⚠️ No se especificó equipo para desinstalar.');
       }
     }
 
     // ============================================================
-    // 4.3 REVISIÓN / DIAGNÓSTICO
+    // 4.3 REVISIÓN / DIAGNÓSTICO (VERSIÓN CORREGIDA)
     // ============================================================
     else if (tipoServicio === 'revision') {
       try {
         console.log('📦 Procesando cambios de inventario por Revisión...');
         
-        // ✅ Si se reemplazó la cámara
-        if (camaraVieja && camaraNueva && economico) {
-          console.log('📷 Reemplazando cámara:', camaraVieja, '→', camaraNueva);
-          var resultadoCamara = _actualizarEstadoGPSReemplazo(camaraVieja, camaraNueva, economico);
-          console.log('📦 Resultado reemplazo de cámara:', JSON.stringify(resultadoCamara));
+        // ✅ Obtener equipos actuales del vehículo
+        var equiposExistentes = _verificarEquiposVehiculo(economico);
+        console.log('📌 Equipos existentes en', economico, ':', equiposExistentes);
+        
+        // ============================================================
+        // 1. PROCESAR CÁMARA (si se envió una)
+        // ============================================================
+        if (camara || camaraNueva) {
+          var nuevaCamara = camaraNueva || camara;
+          
+          if (equiposExistentes && equiposExistentes.camara) {
+            // ✅ El vehículo ya tiene cámara → REEMPLAZO
+            var camaraViejaActual = equiposExistentes.camara;
+            
+            // ✅ Verificar que la nueva cámara no sea la misma que la vieja
+            if (camaraViejaActual !== nuevaCamara) {
+              console.log('📷 Reemplazando cámara:', camaraViejaActual, '→', nuevaCamara);
+              var resultadoCamara = _actualizarEstadoGPSReemplazo(camaraViejaActual, nuevaCamara, economico);
+              console.log('📦 Resultado reemplazo de cámara:', JSON.stringify(resultadoCamara));
+            } else {
+              console.log('ℹ️ La cámara nueva es la misma que la actual, no se requiere cambio.');
+            }
+          } else {
+            // ✅ El vehículo NO tiene cámara → INSTALACIÓN
+            console.log('📷 Instalando cámara en revisión:', nuevaCamara);
+            var resultadoCamara = _actualizarEstadoGPS(nuevaCamara, economico);
+            console.log('📦 Resultado instalación de cámara:', JSON.stringify(resultadoCamara));
+          }
         }
         
-        // ✅ Si se reemplazó el gateway
-        if (datos.gatewayViejo && datos.gatewayNuevo && economico) {
-          console.log('📡 Reemplazando gateway:', datos.gatewayViejo, '→', datos.gatewayNuevo);
-          var resultadoGateway = _actualizarEstadoGPSReemplazo(datos.gatewayViejo, datos.gatewayNuevo, economico);
-          console.log('📦 Resultado reemplazo de gateway:', JSON.stringify(resultadoGateway));
+        // ============================================================
+        // 2. PROCESAR GATEWAY (si se envió uno)
+        // ============================================================
+        if (gatewayNuevo || serieGPS) {
+          var nuevoGateway = gatewayNuevo || serieGPS;
+          
+          if (equiposExistentes && equiposExistentes.gateway) {
+            // ✅ El vehículo ya tiene gateway → REEMPLAZO
+            var gatewayViejoActual = equiposExistentes.gateway;
+            
+            // ✅ Verificar que el nuevo gateway no sea el mismo que el viejo
+            if (gatewayViejoActual !== nuevoGateway) {
+              console.log('📡 Reemplazando gateway:', gatewayViejoActual, '→', nuevoGateway);
+              var resultadoGateway = _actualizarEstadoGPSReemplazo(gatewayViejoActual, nuevoGateway, economico);
+              console.log('📦 Resultado reemplazo de gateway:', JSON.stringify(resultadoGateway));
+            } else {
+              console.log('ℹ️ El gateway nuevo es el mismo que el actual, no se requiere cambio.');
+            }
+          } else {
+            // ✅ El vehículo NO tiene gateway → INSTALACIÓN
+            console.log('📡 Instalando gateway en revisión:', nuevoGateway);
+            var resultadoGateway = _actualizarEstadoGPS(nuevoGateway, economico);
+            console.log('📦 Resultado instalación de gateway:', JSON.stringify(resultadoGateway));
+          }
         }
         
-        // ✅ Si solo se retiró un equipo (sin reemplazo)
-        if (datos.equipoRetirado && !datos.equipoNuevo) {
-          console.log('🗑️ Retirando equipo:', datos.equipoRetirado);
-          var resultadoRetiro = _actualizarEstadoGPSDesinstalacion(datos.equipoRetirado);
+        // ============================================================
+        // 3. PROCESAR RETIRO DE EQUIPO (si se especificó)
+        // ============================================================
+        if (equipoRetirado) {
+          console.log('🗑️ Retirando equipo:', equipoRetirado);
+          var resultadoRetiro = _actualizarEstadoGPSDesinstalacion(equipoRetirado);
           console.log('📦 Resultado retiro:', JSON.stringify(resultadoRetiro));
         }
+        
+        // ============================================================
+        // 4. SI ES SOLO DIAGNÓSTICO
+        // ============================================================
+        if (soloDiagnostico) {
+          console.log('ℹ️ Solo diagnóstico, no se afecta inventario.');
+        }
+        
+        // ============================================================
+        // 5. SI NO HAY NINGÚN CAMBIO
+        // ============================================================
+        if (!camara && !camaraNueva && !gatewayNuevo && !serieGPS && !equipoRetirado && !soloDiagnostico) {
+          console.log('ℹ️ No se detectaron cambios en inventario para esta Revisión.');
+        }
+        
       } catch (invError) {
         console.warn('⚠️ Error al actualizar inventario (Revisión):', invError.message);
       }
@@ -1428,6 +1503,7 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
     console.log('   Técnico:', sesion.nombre);
     console.log('   Vehículo:', economico);
     if (serieGPS) console.log('   Serie GPS:', serieGPS);
+    if (camara) console.log('   Cámara:', camara);
 
     // ============================================================
     // 8. CREAR NOTIFICACIONES
@@ -2053,126 +2129,87 @@ function obtenerParametrosFrontend(token) {
 // ============================================================
 
 /**
- * Valida una serie GPS en tiempo real evaluando su último estado en el inventario
+ * Valida si una serie GPS existe en el inventario y devuelve su tipo
  * @param {string} token - Token de sesión
- * @param {string} serieGPS - Serie a validar (acepta con o sin guiones, mayúsculas o minúsculas)
- * @returns {Object} { ok: boolean, disponible: boolean, mensaje: string, estado: string, detalles: Object }
+ * @param {string} serie - Serie del GPS a validar (limpia, sin guiones)
+ * @param {string} tipoEquipo - 'gateway' o 'camara'
+ * @returns {Object} { ok, encontrada, tipo, tipoNombre, estado, economico }
  */
-function validarSerieGPSInventario(token, serieGPS) {
-  var sesionResp = validarSesion(token);
-  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-
-  if (!serieGPS || serieGPS.toString().trim() === '') {
-    return { ok: true, disponible: false, mensaje: 'Ingresa una serie GPS', estado: 'vacio' };
-  }
-
-  // 💡 MEJORA EN FORMATO: Limpiamos la serie para que la validación sea flexible y humana
-  var serieBusquedaClean = serieGPS.toString().toUpperCase().replace(/-/g, '').trim();
-
-  // Validamos que tenga exactamente 10 caracteres alfanuméricos (Estructura de tu formato 4-3-3)
-  var regexEstructura = /^[A-Z0-9]{10}$/;
-  if (!regexEstructura.test(serieBusquedaClean)) {
-    return { ok: true, disponible: false, mensaje: 'Formato inválido. Debe tener 10 caracteres (ej: XXXX-XXX-XXX)', estado: 'formato_invalido' };
-  }
-
+function validarSerieGPSInventario(token, serie, tipoEquipo) {
   try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
     var sheet = SHEETS.INVENTARIO();
     if (!sheet) {
-      return { ok: false, error: 'No se encontró la hoja de inventario.' };
+      return { ok: false, error: 'No se encontró la hoja de Inventario' };
     }
 
     var datos = sheet.getDataRange().getValues();
-    var ultimaCoincidencia = null;
 
-    // Recorremos toda la hoja para capturar siempre el último movimiento (Compatibilidad con historiales)
+    // Limpiar serie para búsqueda
+    var serieBusqueda = serie.toString().toUpperCase().replace(/[-_\s]/g, '').trim();
+
     for (var i = 1; i < datos.length; i++) {
-      var fila = datos[i];
-      var serieCeldaRaw = fila;
-      if (!serieCeldaRaw) continue;
+      var serieCelda = datos[i][0] || '';
+      var serieCeldaLimpia = serieCelda.toString().toUpperCase().replace(/[-_\s]/g, '').trim();
+      
+      if (serieCeldaLimpia === serieBusqueda) {
+        var tipo = datos[i][1] || '';        // TIPO_EQUIPO (ej: VG54, CM32)
+        var modelo = datos[i][2] || '';      // MODELO (ej: Samsara VG54)
+        var estado = datos[i][4] || '';      // ESTADO (ej: Disponible, Instalado)
+        var economico = datos[i][5] || '';   // ECONOMICO_ASIGNADO
 
-      var serieCeldaClean = serieCeldaRaw.toString().toUpperCase().replace(/-/g, '').trim();
+        // Determinar el nombre del tipo (para mostrar en la interfaz)
+        var tipoNombre = '';
+        var tipoStr = tipo.toString().toUpperCase();
+        
+        // Mapeo de tipos
+        if (tipoStr.indexOf('VG') !== -1) {
+          // Es un Gateway
+          if (tipoStr === 'VG54') tipoNombre = 'Samsara VG54';
+          else if (tipoStr === 'VG55') tipoNombre = 'Samsara VG55';
+          else tipoNombre = 'Samsara ' + tipo;
+        } else if (tipoStr.indexOf('CM') !== -1) {
+          // Es una Cámara
+          if (tipoStr === 'CM32') tipoNombre = 'Samsara CM32';
+          else if (tipoStr === 'CM34') tipoNombre = 'Samsara CM34';
+          else tipoNombre = 'Samsara ' + tipo;
+        } else {
+          tipoNombre = tipo.toString();
+        }
 
-      if (serieCeldaClean === serieBusquedaClean) {
-        // En lugar de hacer return inmediato, guardamos la fila. 
-        // Si aparece más abajo, se actualizará con el estado más reciente.
-        ultimaCoincidencia = {
-          serieFormateadaBase: serieCeldaRaw.toString().toUpperCase().trim(),
-          estadoRaw: fila || 'DESCONOCIDO',
-          estadoClean: (fila || '').toString().toUpperCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, ""), // Remueve acentos
-          economicoAsignado: (fila || '').toString().trim(),
-          ticketGarantia: (fila || '').toString().trim()
+        // Verificar que coincida con el tipo de equipo solicitado
+        var esGateway = tipoStr.indexOf('VG') !== -1;
+        var esCamara = tipoStr.indexOf('CM') !== -1;
+        
+        if (tipoEquipo === 'gateway' && !esGateway) continue;
+        if (tipoEquipo === 'camara' && !esCamara) continue;
+
+        return {
+          ok: true,
+          encontrada: true,
+          tipo: tipo.toString(),
+          tipoNombre: tipoNombre,
+          modelo: modelo.toString(),
+          estado: estado.toString(),
+          economico: economico.toString()
         };
       }
     }
 
-    // 📋 EVALUACIÓN FINAL DEL ÚLTIMO ESTADO ENCONTRADO
-    if (ultimaCoincidencia) {
-      var est = ultimaCoincidencia.estadoClean;
-      var serieBonita = ultimaCoincidencia.serieFormateadaBase;
-      var eco = ultimaCoincidencia.economicoAsignado;
-      var tkt = ultimaCoincidencia.ticketGarantia;
-
-      if (est === 'DISPONIBLE') {
-        return {
-          ok: true,
-          disponible: true,
-          mensaje: '✅ Serie disponible para instalar',
-          estado: 'disponible',
-          detalles: { estado: 'Disponible' }
-        };
-      }
-
-      if (est === 'INSTALADO') {
-        return {
-          ok: true,
-          disponible: false,
-          mensaje: '⚠️ Serie ' + serieBonita + ' ya instalada en económico: ' + eco,
-          estado: 'instalado',
-          detalles: { estado: 'Instalado', economico: eco }
-        };
-      }
-
-      if (est === 'GARANTIA') {
-        return {
-          ok: true,
-          disponible: false,
-          mensaje: '🚫 Serie ' + serieBonita + ' en garantía. Ticket: ' + (tkt || 'N/A'),
-          estado: 'garantia',
-          detalles: { estado: 'Garantía', ticket: tkt }
-        };
-      }
-
-      if (est === 'BAJA') {
-        return {
-          ok: true,
-          disponible: false,
-          mensaje: '❌ Serie ' + serieBonita + ' dada de baja',
-          estado: 'baja',
-          detalles: { estado: 'Baja' }
-        };
-      }
-
-      // Manejo de estados alterados o textos raros en la celda
-      return {
-        ok: true,
-        disponible: false,
-        mensaje: '⚠️ Estado no controlado para la serie ' + serieBonita + ': ' + ultimaCoincidencia.estadoRaw,
-        estado: 'desconocido',
-        detalles: { estado: ultimaCoincidencia.estadoRaw }
-      };
-    }
-
-    // Si terminó el ciclo y no hay coincidencia
+    // No se encontró la serie
     return {
       ok: true,
-      disponible: false,
-      mensaje: '❌ Serie no encontrada en el inventario',
-      estado: 'no_encontrada'
+      encontrada: false,
+      mensaje: 'Serie no encontrada en el inventario'
     };
 
   } catch (err) {
-    console.error('Error al validar serie GPS:', err);
-    return { ok: false, error: 'Error al validar: ' + err.message };
+    console.error('❌ Error en validarSerieGPSInventario:', err);
+    return { ok: false, error: err.message };
   }
 }
 
@@ -2853,7 +2890,7 @@ function obtenerDispositivosPorEconomico(token, economico) {
         var economicoAsignadoStr = economicoAsignado.toString().toUpperCase().trim();
         var estadoStr = estado.toString().toUpperCase().trim();
 
-        // ✅ CAMBIO 1: Incluir "GARANTÍA" junto con "INSTALADO"
+        // ✅ Incluir "Instalado" y "Garantía"
         if (economicoAsignadoStr === economicoStr && (estadoStr === 'INSTALADO' || estadoStr === 'GARANTÍA')) {
           var tipoStr = tipo.toString().toUpperCase();
 
@@ -2861,14 +2898,14 @@ function obtenerDispositivosPorEconomico(token, economico) {
             resultado.gateway = {
               serie: (serie || '').toString(),
               tipo: tipo.toString(),
-              estado: estado.toString() // ✅ CAMBIO 2: Añadir estado para que el frontend lo muestre
+              estado: estado.toString()
             };
             console.log('✅ Gateway encontrado:', resultado.gateway);
           } else if (tipoStr.indexOf('CAMARA') !== -1 || tipoStr.indexOf('CM') !== -1) {
             resultado.camara = {
               serie: (serie || '').toString(),
               tipo: tipo.toString(),
-              estado: estado.toString() // ✅ CAMBIO 2: Añadir estado para que el frontend lo muestre
+              estado: estado.toString()
             };
             console.log('✅ Cámara encontrada:', resultado.camara);
           }
@@ -8376,12 +8413,12 @@ function _verificarEquiposVehiculo(economico) {
       var tipo = datos[i][1] || '';
 
       if (economicoAsignado.toString().trim() === economico.toString().trim() && 
-          estado === 'Instalado') {
+          (estado === 'Instalado' || estado === 'Garantía')) {
         var serie = datos[i][0] || '';
         var tipoStr = tipo.toString().toUpperCase();
-        if (tipoStr.indexOf('GATEWAY') !== -1 || tipoStr.indexOf('VG') !== -1) {
+        if (tipoStr.indexOf('VG') !== -1) {
           resultado.gateway = serie;
-        } else if (tipoStr.indexOf('CAMARA') !== -1 || tipoStr.indexOf('CM') !== -1) {
+        } else if (tipoStr.indexOf('CM') !== -1) {
           resultado.camara = serie;
         }
       }
@@ -8482,6 +8519,63 @@ function _actualizarEstadoGPSReemplazo(serieVieja, serieNueva, economico) {
 
   } catch (err) {
     console.error('❌ Error en _actualizarEstadoGPSReemplazo:', err);
+    return { ok: false, error: err.message };
+  }
+}
+// ============================================================
+// OBTENER ACCESORIOS DESDE 🔧_Accesorios_Stock
+// ============================================================
+
+/**
+ * Obtiene la lista de accesorios desde la hoja 🔧_Accesorios_Stock
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok, accesorios: [] }
+ */
+function obtenerAccesoriosStock(token) {
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    var sheet = SHEETS.ACCESORIOS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja 🔧_Accesorios_Stock' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var accesorios = [];
+
+    // Saltar encabezado
+    for (var i = 1; i < datos.length; i++) {
+      var accesorio = datos[i][0];
+      var tipo = datos[i][1];
+      var stockTotal = datos[i][2];
+      var asignados = datos[i][3];
+      var disponibles = datos[i][4];
+      var economicoAsignado = datos[i][5];
+      var fechaAsignacion = datos[i][6];
+      var observaciones = datos[i][7];
+
+      if (accesorio) {
+        accesorios.push({
+          clave: accesorio.toString().trim(),
+          nombre: accesorio.toString().trim(),
+          descripcion: tipo ? tipo.toString().trim() : '',
+          stockTotal: stockTotal || 0,
+          asignados: asignados || 0,
+          disponibles: disponibles || 0,
+          economicoAsignado: economicoAsignado ? economicoAsignado.toString().trim() : '',
+          fechaAsignacion: fechaAsignacion || '',
+          observaciones: observaciones || ''
+        });
+      }
+    }
+
+    return { ok: true, accesorios: accesorios };
+
+  } catch (err) {
+    console.error('❌ Error en obtenerAccesoriosStock:', err);
     return { ok: false, error: err.message };
   }
 }
