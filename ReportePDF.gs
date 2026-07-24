@@ -307,34 +307,31 @@ function _formatearFechaHora(val) {
  */
 function generarPDFParaDescarga(token, folio) {
   try {
-    // Usar la función base
     const resultado = _generarPDFBase(token, folio, {
-      subirADrive: false,          // No subir a Drive para descarga directa
-      actualizarBitacora: false,   // No actualizar bitácora
-      registrarAuditoria: true     // Registrar auditoría
+      subirADrive: false,
+      actualizarBitacora: false,
+      registrarAuditoria: true
     });
 
     if (!resultado.success) {
-      return { 
-        ok: false, 
-        error: resultado.error 
-      };
+      return { ok: false, error: resultado.error };
     }
 
-    // Retornar para descarga
+    // ✅ Convertir el blob a base64
+    var pdfBlob = resultado.pdfBlob;
+    var pdfBytes = pdfBlob.getBytes();
+    var pdfBase64 = Utilities.base64Encode(pdfBytes);
+
     return {
       ok: true,
-      pdfBlob: resultado.pdfBlob,
-      fileName: `Orden_Servicio_${folio}.pdf`,
+      pdfBase64: pdfBase64,
+      nombre: 'Reporte_' + folio + '_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss') + '.pdf',
       folio: folio
     };
 
   } catch (err) {
     console.error('❌ Error en generarPDFParaDescarga:', err);
-    return { 
-      ok: false, 
-      error: 'Error al generar PDF: ' + err.message 
-    };
+    return { ok: false, error: 'Error al generar PDF: ' + err.message };
   }
 }
 

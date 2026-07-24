@@ -2719,54 +2719,327 @@ function guardarEdicionEquipo(serie) {
 }
 
 function mostrarFormAgregarEquipo() {
+  // Verificar permisos (solo Administradores)
+  if (!APP.sesion || APP.sesion.rol !== 1) {
+    mostrarToast('⚠️ Solo Administradores pueden agregar equipos.', 'error');
+    return;
+  }
+
   var modalHtml = `
     <div class="modal fade" id="modalAgregarEquipo" tabindex="-1">
-      <div class="modal-dialog">
+      <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title">📦 Agregar nuevo equipo</h5>
             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
           <div class="modal-body">
-            <div class="mb-3"><label class="form-label">Serie <span class="text-danger">*</span></label><input type="text" id="new-serie" class="form-control" placeholder="XXXX-XXX-XXX" required></div>
-            <div class="mb-3"><label class="form-label">Tipo <span class="text-danger">*</span></label>
-              <select id="new-tipo" class="form-select">
-                <option value="VG54">VG54 - Gateway</option><option value="VG55">VG55 - Gateway</option>
-                <option value="CM32">CM32 - Cámara</option><option value="CM34">CM34 - Cámara</option>
-              </select>
-            </div>
-            <div class="mb-3"><label class="form-label">Modelo</label><input type="text" id="new-modelo" class="form-control" placeholder="Samsara CM32"></div>
-            <div class="mb-3"><label class="form-label">IMEI</label><input type="text" id="new-imei" class="form-control" placeholder="123456789012345"></div>
-            <div class="mb-3"><label class="form-label">Estado</label>
-              <select id="new-estado" class="form-select">
-                <option value="Disponible">🟢 Disponible</option>
-                <option value="Instalado">🔵 Instalado</option>
-                <option value="Garantía">🟡 Garantía</option>
-                <option value="Baja">🔴 Baja</option>
-              </select>
-            </div>
-            <div class="mb-3"><label class="form-label">Económico (opcional)</label><input type="text" id="new-economico" class="form-control" placeholder="G-361"></div>
-            <div class="mb-3"><label class="form-label">Observaciones</label><textarea id="new-observaciones" class="form-control" rows="2"></textarea></div>
+            <form id="form-agregar-equipo">
+              <!-- Serie -->
+              <div class="mb-3">
+                <label class="form-label required">Serie <span class="text-danger">*</span></label>
+                <input type="text" id="new-serie" class="form-control" 
+                       placeholder="XXXX-XXX-XXX" required>
+                <div class="form-text">Formato: XXXX-XXX-XXX</div>
+              </div>
+
+              <!-- Tipo de Equipo (dinámico desde 📋_Tipos_Equipo) -->
+              <div class="mb-3">
+                <label class="form-label required">Tipo <span class="text-danger">*</span></label>
+                <select id="new-tipo" class="form-select" required>
+                  <option value="">Cargando tipos...</option>
+                </select>
+                <div class="form-text">Selecciona el tipo de equipo</div>
+              </div>
+
+              <!-- Modelo (se autocompleta según el tipo) -->
+              <div class="mb-3">
+                <label class="form-label">Modelo</label>
+                <input type="text" id="new-modelo" class="form-control" 
+                       placeholder="Se autocompletará según el tipo seleccionado" readonly>
+                <div class="form-text">El modelo se autocompleta automáticamente</div>
+              </div>
+
+              <!-- IMEI -->
+              <div class="mb-3">
+                <label class="form-label">IMEI</label>
+                <input type="text" id="new-imei" class="form-control" 
+                       placeholder="123456789012345" maxlength="15">
+              </div>
+
+              <!-- Estado (dinámico desde 📋_Estados_Inventario) -->
+              <div class="mb-3">
+                <label class="form-label required">Estado <span class="text-danger">*</span></label>
+                <select id="new-estado" class="form-select" required>
+                  <option value="">Cargando estados...</option>
+                </select>
+                <div class="form-text">Selecciona el estado del equipo</div>
+              </div>
+
+              <!-- Económico (obligatorio solo si estado es Instalado) -->
+              <div class="mb-3" id="campo-economico-container">
+                <label class="form-label">Económico <span id="economico-required" class="text-danger" style="display:none;">*</span></label>
+                <select id="new-economico" class="form-select">
+                  <option value="">Selecciona un vehículo...</option>
+                </select>
+                <div class="form-text" id="economico-help">Solo requerido si el estado es "Instalado"</div>
+              </div>
+
+              <!-- Observaciones -->
+              <div class="mb-3">
+                <label class="form-label">Observaciones</label>
+                <textarea id="new-observaciones" class="form-control" rows="2"></textarea>
+              </div>
+            </form>
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-            <button class="btn btn-primary" onclick="guardarNuevoEquipo()"><i class="bi bi-save me-1"></i>Guardar equipo</button>
+            <button class="btn btn-primary" onclick="guardarNuevoEquipo()">
+              <i class="bi bi-save me-1"></i>Guardar equipo
+            </button>
           </div>
         </div>
       </div>
     </div>
   `;
 
+  // Eliminar modal existente
   var modalExistente = document.getElementById('modalAgregarEquipo');
   if (modalExistente) modalExistente.remove();
 
+  // Insertar modal
   var div = document.createElement('div');
   div.innerHTML = modalHtml;
   document.body.appendChild(div);
 
+  // ✅ Cargar tipos de equipo dinámicamente
+  cargarTiposEquipoEnSelect('new-tipo', '');
+
+  // ✅ Evento: cuando cambia el tipo, autocompletar modelo
+  document.getElementById('new-tipo').addEventListener('change', function() {
+    autocompletarModeloPorTipo(this.value);
+  });
+
+  // ✅ Cargar estados de inventario dinámicamente
+  cargarEstadosInventarioEnSelect('new-estado', '');
+
+  // ✅ Cargar vehículos de flotilla para el select de económico
+  cargarVehiculosEnSelect('new-economico', '');
+
+  // ✅ Evento: cuando cambia el estado, mostrar/ocultar campo económico
+  document.getElementById('new-estado').addEventListener('change', function() {
+    var estado = this.value;
+    var campoEconomico = document.getElementById('campo-economico-container');
+    var requiredIndicator = document.getElementById('economico-required');
+    var helpText = document.getElementById('economico-help');
+
+    if (estado === 'Instalado') {
+      campoEconomico.style.display = 'block';
+      requiredIndicator.style.display = 'inline';
+      helpText.textContent = '⚠️ Obligatorio para equipos instalados';
+      helpText.className = 'form-text text-danger';
+      document.getElementById('new-economico').required = true;
+    } else {
+      campoEconomico.style.display = 'block';
+      requiredIndicator.style.display = 'none';
+      helpText.textContent = 'Solo requerido si el estado es "Instalado"';
+      helpText.className = 'form-text';
+      document.getElementById('new-economico').required = false;
+    }
+  });
+
+  // Mostrar modal
   new bootstrap.Modal(document.getElementById('modalAgregarEquipo')).show();
-    // ✅ Cargar estados de inventario en el select
-  cargarEstadosInventarioEnSelect('new-estado', 'Disponible');
+}
+
+/**
+ * Carga los vehículos de la flotilla en un select
+ * @param {string} selectId - ID del select
+ * @param {string} valorSeleccionado - Valor a seleccionar (opcional)
+ */
+function cargarVehiculosEnSelect(selectId, valorSeleccionado) {
+  var select = document.getElementById(selectId);
+  if (!select) {
+    console.warn('⚠️ Select no encontrado:', selectId);
+    return;
+  }
+
+  // Guardar valor actual
+  var valorActual = valorSeleccionado || select.value || '';
+
+  // Limpiar opciones
+  while (select.options.length > 0) {
+    select.remove(0);
+  }
+
+  // Agregar opción por defecto
+  var defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = 'Selecciona un vehículo...';
+  select.appendChild(defaultOption);
+
+  // Obtener vehículos desde la flotilla
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok) {
+        console.warn('⚠️ Error al cargar vehículos:', resp.error);
+        var option = document.createElement('option');
+        option.value = '';
+        option.textContent = '❌ Error al cargar vehículos';
+        select.appendChild(option);
+        return;
+      }
+
+      var vehiculos = resp.vehiculos || [];
+
+      if (vehiculos.length === 0) {
+        var option = document.createElement('option');
+        option.value = '';
+        option.textContent = '⚠️ No hay vehículos registrados';
+        select.appendChild(option);
+        return;
+      }
+
+      vehiculos.forEach(function(v) {
+        var option = document.createElement('option');
+        option.value = v.economico;
+        option.textContent = v.economico + ' - ' + (v.placas || 'Sin placas');
+        if (v.economico === valorActual) {
+          option.selected = true;
+        }
+        select.appendChild(option);
+      });
+
+      console.log('✅ Vehículos cargados:', vehiculos.length);
+
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al cargar vehículos:', err);
+      var option = document.createElement('option');
+      option.value = '';
+      option.textContent = '❌ Error de conexión';
+      select.appendChild(option);
+    })
+    .obtenerVehiculosFlotilla(APP.token);
+}
+
+
+/**
+ * Carga los tipos de equipo desde 📋_Tipos_Equipo en un select
+ * @param {string} selectId - ID del select
+ * @param {string} valorSeleccionado - Valor a seleccionar (opcional)
+ */
+function cargarTiposEnSelect(selectId, valorSeleccionado) {
+  var select = document.getElementById(selectId);
+  if (!select) {
+    console.warn('⚠️ Select no encontrado:', selectId);
+    return;
+  }
+
+  // Guardar valor actual
+  var valorActual = valorSeleccionado || select.value || '';
+
+  // Limpiar opciones
+  while (select.options.length > 0) {
+    select.remove(0);
+  }
+
+  // Agregar opción por defecto
+  var defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = 'Selecciona un tipo...';
+  select.appendChild(defaultOption);
+
+  // Obtener tipos de equipo desde el backend
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok) {
+        console.warn('⚠️ Error al cargar tipos:', resp.error);
+        var option = document.createElement('option');
+        option.value = '';
+        option.textContent = '❌ Error al cargar tipos';
+        select.appendChild(option);
+        return;
+      }
+
+      var tipos = resp.tipos || [];
+      var tiposFiltrados = tipos.filter(function(t) {
+        var clave = t.clave.toUpperCase();
+        // ✅ Excluir accesorios (ARNES, BTN, EI) y tipos inactivos
+        return clave.indexOf('ARNES') === -1 &&
+               clave.indexOf('BTN') === -1 &&
+               clave.indexOf('EI') === -1 &&
+               t.activo !== false;
+      });
+
+      tiposFiltrados.forEach(function(t) {
+        var option = document.createElement('option');
+        option.value = t.clave;
+        option.textContent = t.nombre + ' (' + t.descripcion + ')';
+        if (t.clave === valorActual) {
+          option.selected = true;
+        }
+        select.appendChild(option);
+      });
+
+      console.log('✅ Tipos cargados:', tiposFiltrados.length);
+
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al cargar tipos:', err);
+      var option = document.createElement('option');
+      option.value = '';
+      option.textContent = '❌ Error de conexión';
+      select.appendChild(option);
+    })
+    .obtenerTiposEquipo(APP.token, null);
+}
+/**
+ * Autocompleta el modelo según el tipo de equipo seleccionado
+ * @param {string} tipoClave - Clave del tipo (ej: VG54, CM32)
+ */
+function autocompletarModeloPorTipo(tipoClave) {
+  var modeloInput = document.getElementById('new-modelo');
+  if (!modeloInput) return;
+
+  if (!tipoClave) {
+    modeloInput.value = '';
+    modeloInput.placeholder = 'Se autocompletará según el tipo seleccionado';
+    return;
+  }
+
+  // Buscar el nombre del tipo en la hoja 📋_Tipos_Equipo
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok || !resp.tipos) {
+        modeloInput.value = '';
+        modeloInput.placeholder = 'Modelo no encontrado';
+        return;
+      }
+
+      var tipos = resp.tipos || [];
+      var encontrado = false;
+
+      tipos.forEach(function(t) {
+        if (t.clave === tipoClave) {
+          modeloInput.value = t.nombre;
+          modeloInput.placeholder = '';
+          encontrado = true;
+          console.log('✅ Modelo autocompletado:', t.nombre);
+        }
+      });
+
+      if (!encontrado) {
+        modeloInput.value = '';
+        modeloInput.placeholder = 'Modelo no encontrado';
+      }
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al buscar modelo:', err);
+      modeloInput.value = '';
+      modeloInput.placeholder = 'Error al cargar modelo';
+    })
+    .obtenerTiposEquipo(APP.token, null);
 }
 
 function guardarNuevoEquipo() {
@@ -2778,21 +3051,107 @@ function guardarNuevoEquipo() {
   var economico = document.getElementById('new-economico').value.trim();
   var observaciones = document.getElementById('new-observaciones').value.trim();
 
-  if (!serie) { mostrarToast('⚠️ La serie es obligatoria.', 'error'); return; }
-  var regexSerie = /^[A-Z0-9]{4}-[A-Z0-9]{3}-[A-Z0-9]{3}$/;
-  if (!regexSerie.test(serie.toUpperCase())) { mostrarToast('⚠️ Formato de serie inválido. Usa: XXXX-XXX-XXX', 'error'); return; }
+  // ============================================================
+  // VALIDACIONES
+  // ============================================================
+  
+  if (!serie) {
+    mostrarToast('⚠️ La serie es obligatoria.', 'error');
+    document.getElementById('new-serie').focus();
+    return;
+  }
 
-  mostrarToast('📦 Guardando equipo...', 'info');
+  var regexSerie = /^[A-Z0-9]{4}-[A-Z0-9]{3}-[A-Z0-9]{3}$/;
+  if (!regexSerie.test(serie.toUpperCase())) {
+    mostrarToast('⚠️ Formato de serie inválido. Usa: XXXX-XXX-XXX', 'error');
+    document.getElementById('new-serie').focus();
+    return;
+  }
+
+  if (!tipo) {
+    mostrarToast('⚠️ Debes seleccionar un tipo de equipo.', 'error');
+    document.getElementById('new-tipo').focus();
+    return;
+  }
+
+  if (!estado) {
+    mostrarToast('⚠️ Debes seleccionar un estado.', 'error');
+    document.getElementById('new-estado').focus();
+    return;
+  }
+
+  // ✅ Si el estado es Instalado, verificar que haya económico
+  if (estado === 'Instalado' && !economico) {
+    mostrarToast('⚠️ Para instalar el equipo, debes asignar un número económico.', 'error');
+    document.getElementById('new-economico').focus();
+    return;
+  }
+
+  // ✅ Verificar que la serie no exista ya
+  mostrarToast('🔍 Verificando serie...', 'info');
 
   google.script.run
-    .withSuccessHandler(function(resp) {
-      if (resp.ok) { mostrarToast('✅ Equipo agregado correctamente', 'success');
-        var modal = bootstrap.Modal.getInstance(document.getElementById('modalAgregarEquipo'));
-        if (modal) modal.hide();
-        cargarInventario(); } else mostrarToast('❌ Error: ' + resp.error, 'error');
+    .withSuccessHandler(function(verificacion) {
+      if (verificacion.existe) {
+        mostrarToast('⚠️ La serie ' + serie + ' ya está registrada en el inventario.', 'error');
+        document.getElementById('new-serie').focus();
+        document.getElementById('new-serie').select();
+        return;
+      }
+
+      // ✅ Proceder a guardar
+      continuarGuardarEquipo();
+
     })
-    .withFailureHandler(function(err) { mostrarToast('❌ Error: ' + err.message, 'error'); })
-    .agregarEquipoInventario(APP.token, { serie: serie.toUpperCase(), tipo, modelo, imei, estado, economico, observaciones });
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al verificar serie:', err);
+      // Continuar igual, el backend validará
+      continuarGuardarEquipo();
+    })
+    .verificarSerieInventario(APP.token, serie);
+
+  function continuarGuardarEquipo() {
+    mostrarToast('📦 Guardando equipo...', 'info');
+
+    // Deshabilitar botón
+    var btnGuardar = document.querySelector('#modalAgregarEquipo .btn-primary');
+    if (btnGuardar) {
+      btnGuardar.disabled = true;
+      btnGuardar.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Guardando...';
+    }
+
+    google.script.run
+      .withSuccessHandler(function(resp) {
+        if (btnGuardar) {
+          btnGuardar.disabled = false;
+          btnGuardar.innerHTML = '<i class="bi bi-save me-1"></i>Guardar equipo';
+        }
+        if (resp.ok) {
+          mostrarToast('✅ Equipo agregado correctamente', 'success');
+          var modal = bootstrap.Modal.getInstance(document.getElementById('modalAgregarEquipo'));
+          if (modal) modal.hide();
+          cargarInventario();
+        } else {
+          mostrarToast('❌ Error: ' + resp.error, 'error');
+        }
+      })
+      .withFailureHandler(function(err) {
+        if (btnGuardar) {
+          btnGuardar.disabled = false;
+          btnGuardar.innerHTML = '<i class="bi bi-save me-1"></i>Guardar equipo';
+        }
+        mostrarToast('❌ Error: ' + err.message, 'error');
+      })
+      .agregarEquipoInventario(APP.token, {
+        serie: serie.toUpperCase(),
+        tipo: tipo,
+        modelo: modelo,
+        imei: imei,
+        estado: estado,
+        economico: economico,
+        observaciones: observaciones
+      });
+  }
 }
 
 function exportarInventarioExcel() {
@@ -6585,25 +6944,62 @@ function validarSerieGPS(valor) {
 // DESCARGA DE PDF - UNIFICADA
 // ════════════════════════════════════════════════════════════
 function descargarPDF(folio) {
-  if (!folio) { mostrarToast('⚠️ Folio no válido', 'warning'); return; }
+  if (!folio) {
+    mostrarToast('⚠️ Folio no válido', 'warning');
+    return;
+  }
   var token = APP.token || '';
-  if (!token) { mostrarToast('⚠️ Sesión expirada. Inicia sesión nuevamente.', 'warning'); return; }
+  if (!token) {
+    mostrarToast('⚠️ Sesión expirada. Inicia sesión nuevamente.', 'warning');
+    return;
+  }
 
   mostrarToast('📄 Generando PDF para ' + folio + '...', 'info');
 
   google.script.run
     .withSuccessHandler(function(response) {
+      console.log('📄 Respuesta PDF:', response);
+      
       if (response.ok) {
-        var link = document.createElement('a');
-        link.download = response.nombre || 'Reporte_' + folio + '.pdf';
-        link.href = 'data:application/pdf;base64,' + response.pdfBase64;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        mostrarToast('✅ PDF descargado exitosamente', 'success');
-      } else mostrarToast('❌ Error: ' + response.error, 'danger');
+        try {
+          // ✅ Crear un blob desde la base64
+          var byteCharacters = atob(response.pdfBase64);
+          var byteNumbers = new Array(byteCharacters.length);
+          for (var i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          var byteArray = new Uint8Array(byteNumbers);
+          var blob = new Blob([byteArray], { type: 'application/pdf' });
+          
+          // ✅ Crear URL de objeto (más seguro que data URL para archivos grandes)
+          var url = URL.createObjectURL(blob);
+          
+          // ✅ Crear enlace y descargar
+          var link = document.createElement('a');
+          link.href = url;
+          link.download = response.nombre || 'Reporte_' + folio + '.pdf';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          
+          // ✅ Liberar la URL después de un tiempo
+          setTimeout(function() {
+            URL.revokeObjectURL(url);
+          }, 5000);
+          
+          mostrarToast('✅ PDF descargado exitosamente', 'success');
+        } catch (err) {
+          console.error('❌ Error al procesar PDF:', err);
+          mostrarToast('❌ Error al procesar PDF: ' + err.message, 'danger');
+        }
+      } else {
+        mostrarToast('❌ Error: ' + response.error, 'danger');
+      }
     })
-    .withFailureHandler(function(error) { mostrarToast('❌ Error al descargar: ' + error.message, 'danger'); })
+    .withFailureHandler(function(error) {
+      console.error('❌ Error al descargar:', error);
+      mostrarToast('❌ Error al descargar: ' + error.message, 'danger');
+    })
     .generarPDFParaDescarga(token, folio);
 }
 
@@ -9258,48 +9654,68 @@ function cargarEstadosInventario() {
 }
 
 /**
- * Carga estados de inventario en el modal de edición de equipo
+ * Carga los estados de inventario desde 📋_Estados_Inventario en un select
  * @param {string} selectId - ID del select
- * @param {string} valorSeleccionado - Valor a seleccionar
+ * @param {string} valorSeleccionado - Valor a seleccionar (opcional)
  */
 function cargarEstadosInventarioEnSelect(selectId, valorSeleccionado) {
-  if (!APP.token) {
-    setTimeout(function() {
-      cargarEstadosInventarioEnSelect(selectId, valorSeleccionado);
-    }, 500);
+  var select = document.getElementById(selectId);
+  if (!select) {
+    console.warn('⚠️ Select no encontrado:', selectId);
     return;
   }
 
-  var select = document.getElementById(selectId);
-  if (!select) return;
+  // Guardar valor actual
+  var valorActual = valorSeleccionado || select.value || '';
 
+  // Limpiar opciones
+  while (select.options.length > 0) {
+    select.remove(0);
+  }
+
+  // Agregar opción por defecto
+  var defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = 'Selecciona un estado...';
+  select.appendChild(defaultOption);
+
+  // Obtener estados desde el backend
   google.script.run
     .withSuccessHandler(function(resp) {
-      if (!resp.ok || !resp.estados) return;
+      if (!resp.ok) {
+        console.warn('⚠️ Error al cargar estados:', resp.error);
+        var option = document.createElement('option');
+        option.value = '';
+        option.textContent = '❌ Error al cargar estados';
+        select.appendChild(option);
+        return;
+      }
 
       var estados = resp.estados || [];
-      
-      // Limpiar opciones (mantener la primera)
-      while (select.options.length > 1) {
-        select.remove(1);
-      }
 
       estados.forEach(function(e) {
         var option = document.createElement('option');
         option.value = e.nombre;
         option.textContent = e.nombre;
         if (e.color) {
-          option.style.borderLeft = '4px solid var(--bs-' + e.color + ')';
+          option.style.borderLeft = '4px solid ' + e.color;
           option.style.paddingLeft = '8px';
         }
-        if (valorSeleccionado && e.nombre === valorSeleccionado) {
+        if (e.nombre === valorActual) {
           option.selected = true;
         }
         select.appendChild(option);
       });
+
+      console.log('✅ Estados de inventario cargados:', estados.length);
+
     })
     .withFailureHandler(function(err) {
-      console.error('❌ Error al cargar estados de inventario:', err);
+      console.error('❌ Error al cargar estados:', err);
+      var option = document.createElement('option');
+      option.value = '';
+      option.textContent = '❌ Error de conexión';
+      select.appendChild(option);
     })
     .obtenerEstadosInventario(APP.token);
 }

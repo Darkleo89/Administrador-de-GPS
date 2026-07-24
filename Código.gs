@@ -7209,60 +7209,44 @@ function generarHTMLFlotillaExcel(empresas) {
 // ============================================================
 
 /**
- * Obtiene todos los estados de inventario desde 📋_Estados_Inventario
+ * Obtiene los estados de inventario desde 📋_Estados_Inventario
  * @param {string} token - Token de sesión
  * @returns {Object} { ok: true, estados: [...] }
  */
 function obtenerEstadosInventario(token) {
-  var sesionResp = validarSesion(token);
-  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-
   try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName('📋_Estados_Inventario');
-    
-    // Si no existe la hoja, crearla con valores por defecto
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('📋_Estados_Inventario');
     if (!sheet) {
-      sheet = ss.insertSheet('📋_Estados_Inventario');
-      var headers = ['ID', 'NOMBRE', 'COLOR'];
-      sheet.getRange(1, 1, 1, 3).setValues([headers]);
-      
-      var datosDefault = [
-        [1, 'Disponible', 'success'],
-        [2, 'Instalado', 'primary'],
-        [3, 'Garantía', 'warning'],
-        [4, 'Baja', 'danger']
-      ];
-      sheet.getRange(2, 1, datosDefault.length, 3).setValues(datosDefault);
-      
-      // Ajustar anchos
-      sheet.setColumnWidth(1, 60);
-      sheet.setColumnWidth(2, 120);
-      sheet.setColumnWidth(3, 100);
-      
-      return { ok: true, estados: datosDefault.map(function(e) {
-        return { id: e[0], nombre: e[1], color: e[2] };
-      })};
+      return { ok: false, error: 'No se encontró la hoja 📋_Estados_Inventario' };
     }
 
     var datos = sheet.getDataRange().getValues();
     var estados = [];
 
     for (var i = 1; i < datos.length; i++) {
-      var fila = datos[i];
-      if (!fila[0]) continue;
-      
-      estados.push({
-        id: Number(fila[0]),
-        nombre: fila[1] ? fila[1].toString().trim() : '',
-        color: fila[2] ? fila[2].toString().trim().toLowerCase() : 'secondary'
-      });
+      var id = datos[i][0];
+      var nombre = datos[i][1];
+      var color = datos[i][2];
+      var activo = datos[i][3];
+
+      if (nombre && activo === true) {
+        estados.push({
+          id: id,
+          nombre: nombre.toString().trim(),
+          color: color || '#6c757d'
+        });
+      }
     }
 
     return { ok: true, estados: estados };
 
   } catch (err) {
-    console.error('Error en obtenerEstadosInventario:', err);
+    console.error('❌ Error en obtenerEstadosInventario:', err);
     return { ok: false, error: err.message };
   }
 }
@@ -7984,38 +7968,33 @@ function actualizarTicket(token, ticketId, datos) {
   }
 }
 /**
- * Obtiene la lista de vehículos de la flotilla para el selector de tickets
+ * Obtiene los vehículos de la flotilla para selectores
  * @param {string} token - Token de sesión
- * @returns {Object} { ok: boolean, vehiculos: [{economico, placas}] }
+ * @returns {Object} { ok: true, vehiculos: [...] }
  */
 function obtenerVehiculosFlotilla(token) {
   try {
-    const sesionResp = validarSesion(token);
+    var sesionResp = validarSesion(token);
     if (!sesionResp.ok) {
       return { ok: false, error: sesionResp.error };
     }
 
-    const sheet = SHEETS.FLOTILLA();
+    var sheet = SHEETS.FLOTILLA();
     if (!sheet) {
       return { ok: false, error: 'No se encontró la hoja de Flotilla' };
     }
 
-    const datos = sheet.getDataRange().getValues();
-    const headers = datos[0];
+    var datos = sheet.getDataRange().getValues();
+    var vehiculos = [];
 
-    const idxEconomico = headers.indexOf('ECONOMICO');
-    const idxPlacas = headers.indexOf('PLACAS');
-
-    if (idxEconomico === -1) {
-      return { ok: false, error: 'Estructura de flotilla incompleta: falta columna ECONOMICO' };
-    }
-
-    const vehiculos = [];
     for (var i = 1; i < datos.length; i++) {
-      if (datos[i][idxEconomico]) {
+      var economico = datos[i][0];
+      var placas = datos[i][1] || '';
+
+      if (economico) {
         vehiculos.push({
-          economico: datos[i][idxEconomico].toString(),
-          placas: datos[i][idxPlacas] || ''
+          economico: economico.toString().trim(),
+          placas: placas.toString().trim()
         });
       }
     }
