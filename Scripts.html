@@ -4092,6 +4092,8 @@ function autocompletarDispositivos() {
   var economico = economicoInput.value.trim();
   var status = document.getElementById('autocompletar-status');
 
+  console.log('🔍 autocompletarDispositivos - Económico:', economico);
+
   limpiarCamposAutocompletado();
 
   if (!economico || economico.length < 3) {
@@ -4106,56 +4108,95 @@ function autocompletarDispositivos() {
 
   google.script.run
     .withSuccessHandler(function(resp) {
+      console.log('✅ Respuesta de obtenerDispositivosPorEconomico:', resp);
+      
       if (status) status.style.display = 'none';
-      if (!resp.ok) { mostrarToast(resp.error || 'No se encontraron dispositivos en ' + economico, 'warning'); return; }
+      if (!resp.ok) {
+        mostrarToast(resp.error || 'No se encontraron dispositivos en ' + economico, 'warning');
+        return;
+      }
 
       var encontrados = 0;
 
+      // ✅ GATEWAY
       if (resp.gateway) {
         var serieGateway = document.getElementById('serie-gateway');
         var tipoGateway = document.getElementById('tipo-gateway');
-        if (serieGateway) { serieGateway.value = resp.gateway.serie;
-          if (typeof validarSerieGPS === 'function') validarSerieGPS(resp.gateway.serie);
-          encontrados++; }
-        if (tipoGateway) { tipoGateway.value = resp.gateway.tipo;
-          tipoGateway.dispatchEvent(new Event('change', { bubbles: true })); }
+        if (serieGateway) { 
+          serieGateway.value = resp.gateway.serie;
+          encontrados++; 
+        }
+        if (tipoGateway) { 
+          tipoGateway.value = resp.gateway.tipo;
+          tipoGateway.dispatchEvent(new Event('change', { bubbles: true })); 
+        }
+        console.log('✅ Gateway autocompletado:', resp.gateway.serie);
       }
 
+      // ✅ CÁMARA
       if (resp.camara) {
         var serieCamara = document.getElementById('serie-camara');
         var tipoCamara = document.getElementById('tipo-camara');
-        if (serieCamara) { serieCamara.value = resp.camara.serie;
-          encontrados++; }
-        if (tipoCamara) { tipoCamara.value = resp.camara.tipo;
-          tipoCamara.dispatchEvent(new Event('change', { bubbles: true })); }
+        if (serieCamara) { 
+          serieCamara.value = resp.camara.serie;
+          encontrados++; 
+        }
+        if (tipoCamara) { 
+          tipoCamara.value = resp.camara.tipo;
+          tipoCamara.dispatchEvent(new Event('change', { bubbles: true })); 
+        }
+        console.log('✅ Cámara autocompletada:', resp.camara.serie);
       }
 
+      // ✅ ACCESORIOS - MARCAR CHECKBOXES
+      console.log('📌 Accesorios recibidos:', resp.accesorios);
+      
       if (resp.accesorios) {
         var container = document.getElementById('accesorios-container');
+        console.log('📌 Contenedor de accesorios:', container);
+        
         if (container) {
           var checkboxes = container.querySelectorAll('input[type="checkbox"]');
-          for (var tipoAccesorioInstalado in resp.accesorios) {
-            if (resp.accesorios[tipoAccesorioInstalado] === true) {
-              var tipoInstaladoUpper = tipoAccesorioInstalado.toUpperCase().trim();
+          console.log('📌 Checkboxes encontrados:', checkboxes.length);
+          
+          // Desmarcar todos primero
+          checkboxes.forEach(function(chk) {
+            chk.checked = false;
+          });
+
+          // Marcar los que están en la respuesta
+          var marcados = 0;
+          for (var accKey in resp.accesorios) {
+            if (resp.accesorios[accKey] === true) {
+              console.log('📌 Buscando checkbox para:', accKey);
               checkboxes.forEach(function(chk) {
                 var label = container.querySelector('label[for="' + chk.id + '"]');
                 if (label) {
-                  var textoLabelUpper = label.textContent.toUpperCase().trim();
-                  if (textoLabelUpper.indexOf(tipoInstaladoUpper) !== -1 || chk.value.toUpperCase() === tipoInstaladoUpper) {
+                  var textoLabel = label.textContent.trim().toUpperCase();
+                  var accKeyUpper = accKey.toString().toUpperCase().trim();
+                  if (textoLabel.indexOf(accKeyUpper) !== -1) {
                     chk.checked = true;
-                    chk.dispatchEvent(new Event('change', { bubbles: true }));
+                    marcados++;
+                    console.log('   ✅ Checkbox marcado:', accKey);
                   }
                 }
               });
             }
           }
+          console.log('📌 Total accesorios marcados:', marcados);
+        } else {
+          console.warn('⚠️ No se encontró el contenedor de accesorios');
         }
       }
 
-      if (encontrados > 0) mostrarToast('✅ ' + encontrados + ' componentes cargados para ' + economico, 'success');
-      else mostrarToast('ℹ️ No se encontraron dispositivos activos instalados en ' + economico, 'info');
+      if (encontrados > 0) {
+        mostrarToast('✅ ' + encontrados + ' componentes cargados para ' + economico, 'success');
+      } else {
+        mostrarToast('ℹ️ No se encontraron dispositivos activos instalados en ' + economico, 'info');
+      }
     })
     .withFailureHandler(function(err) {
+      console.error('❌ Error:', err);
       if (status) status.style.display = 'none';
       mostrarToast('❌ Error al buscar dispositivos en el servidor', 'error');
     })
@@ -4403,13 +4444,12 @@ function cargarTiposEquipo() {
     containerAccesorios.innerHTML = '<div class="text-muted small">Cargando accesorios...</div>';
   }
 
-  // ✅ OBTENER TIPOS DE EQUIPO (Gateways y Cámaras)
   google.script.run
     .withSuccessHandler(function(resp) {
       console.log('✅ Respuesta de obtenerTiposEquipo:', resp);
       
       if (!resp.ok) {
-        console.warn('❌ Error en base de datos de equipos:', resp.error);
+        console.warn('❌ Error:', resp.error);
         if (containerAccesorios) {
           containerAccesorios.innerHTML = '❌ Error al cargar accesorios';
         }
@@ -4417,14 +4457,14 @@ function cargarTiposEquipo() {
       }
 
       if (!resp.tipos || resp.tipos.length === 0) {
-        console.warn('⚠️ No se encontraron tipos de equipo');
+        console.warn('⚠️ No hay tipos de equipo');
         if (containerAccesorios) {
           containerAccesorios.innerHTML = '⚠️ No hay accesorios configurados';
         }
         return;
       }
 
-      // ✅ Limpiar contenedor de accesorios
+      // Limpiar contenedor de accesorios
       if (containerAccesorios) {
         containerAccesorios.innerHTML = '';
       }
@@ -4433,16 +4473,13 @@ function cargarTiposEquipo() {
       var totalCamaras = 0;
       var totalAccesorios = 0;
 
-      console.log('📌 Procesando', resp.tipos.length, 'tipos de equipo...');
+      console.log('📌 Procesando', resp.tipos.length, 'tipos...');
 
-      // ✅ Procesar tipos de equipo (Gateways y Cámaras)
       resp.tipos.forEach(function(t) {
         var claveUpper = (t.clave || '').toUpperCase().trim();
         var nombreUpper = (t.nombre || '').toUpperCase().trim();
 
-        console.log('   - Procesando:', t.clave, '→', t.nombre);
-
-        // ✅ Detectar Gateway (VG)
+        // Gateway (VG)
         if (claveUpper.indexOf('VG') === 0) {
           if (selectGateway) {
             var option = document.createElement('option');
@@ -4450,10 +4487,9 @@ function cargarTiposEquipo() {
             option.textContent = t.nombre + ' (' + (t.descripcion || '') + ')';
             selectGateway.appendChild(option);
             totalGateways++;
-            console.log('      ✅ Gateway agregado:', t.clave);
           }
         }
-        // ✅ Detectar Cámara (CM)
+        // Cámara (CM)
         else if (claveUpper.indexOf('CM') === 0) {
           if (selectCamara) {
             var option = document.createElement('option');
@@ -4461,21 +4497,41 @@ function cargarTiposEquipo() {
             option.textContent = t.nombre + ' (' + (t.descripcion || '') + ')';
             selectCamara.appendChild(option);
             totalCamaras++;
-            console.log('      ✅ Cámara agregada:', t.clave);
+          }
+        }
+        // ✅ Accesorios (TODO lo demás)
+        else {
+          if (containerAccesorios) {
+            var div = document.createElement('div');
+            div.className = 'form-check form-check-inline mb-2';
+            div.style.minWidth = '200px';
+            div.innerHTML = `
+              <input class="form-check-input" type="checkbox" id="chk-${t.clave}" value="${t.clave}">
+              <label class="form-check-label" for="chk-${t.clave}">
+                <strong>${t.nombre}</strong>
+                <span class="text-muted small d-block" style="font-size: 10px;">
+                  (${t.descripcion || 'Accesorio'})
+                </span>
+              </label>
+            `;
+            containerAccesorios.appendChild(div);
+            totalAccesorios++;
           }
         }
       });
 
-      // ✅ CARGAR ACCESORIOS DESDE 🔧_Accesorios_Stock
-      cargarAccesoriosDesdeStock(containerAccesorios);
-
       console.log('✅ Carga completa:');
       console.log('   Gateways:', totalGateways);
       console.log('   Cámaras:', totalCamaras);
+      console.log('   Accesorios:', totalAccesorios);
+
+      if (totalAccesorios === 0 && containerAccesorios) {
+        containerAccesorios.innerHTML = '<div class="text-muted small">No hay accesorios configurados</div>';
+      }
 
     })
     .withFailureHandler(function(err) {
-      console.error('❌ Error crítico al conectar con Google Script:', err);
+      console.error('❌ Error:', err);
       if (containerAccesorios) {
         containerAccesorios.innerHTML = '❌ Error de conexión: ' + err.message;
       }

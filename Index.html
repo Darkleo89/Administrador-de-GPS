@@ -249,7 +249,7 @@
                   <input type="text" id="inp-economico" class="form-control"
                     placeholder="ECO-342" required
                     onblur="autocompletarDispositivos()"
-                    ninput="this.value=this.value.toUpperCase()">
+                    oninput="this.value=this.value.toUpperCase(); autocompletarDispositivos()">
                 </div>
                 <div id="autocompletar-status" class="small text-muted mt-1" style="display:none;">
                   <i class="bi bi-arrow-repeat spinner-border spinner-border-sm me-1"></i>

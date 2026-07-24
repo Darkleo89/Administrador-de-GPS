@@ -1270,6 +1270,7 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
     var serieGPS = datos.serieGPS || datos.gateway || '';
     var economico = datos.economico || '';
     var camara = datos.camara || '';
+    var accesoriosForm = datos.accesorios || {}; // ✅ Accesorios del formulario
     
     // ✅ Campos para Revisión
     var camaraVieja = datos.camaraVieja || '';
@@ -1289,6 +1290,7 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
     console.log('   gatewayNuevo:', gatewayNuevo || 'NO HAY');
     console.log('   equipoRetirado:', equipoRetirado || 'NO HAY');
     console.log('   soloDiagnostico:', soloDiagnostico);
+    console.log('   accesoriosForm:', accesoriosForm);
 
     // ============================================================
     // 4.1 INSTALACIÓN
@@ -1331,16 +1333,16 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
     }
 
     // ============================================================
-    // 4.3 REVISIÓN / DIAGNÓSTICO (VERSIÓN CORREGIDA)
+    // 4.3 REVISIÓN / DIAGNÓSTICO (VERSIÓN COMPLETA CON ACCESORIOS)
     // ============================================================
     else if (tipoServicio === 'revision') {
       try {
         console.log('📦 Procesando cambios de inventario por Revisión...');
-        
+
         // ✅ Obtener equipos actuales del vehículo
         var equiposExistentes = _verificarEquiposVehiculo(economico);
         console.log('📌 Equipos existentes en', economico, ':', equiposExistentes);
-        
+
         // ============================================================
         // 1. PROCESAR CÁMARA (si se envió una)
         // ============================================================
@@ -1366,7 +1368,7 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
             console.log('📦 Resultado instalación de cámara:', JSON.stringify(resultadoCamara));
           }
         }
-        
+
         // ============================================================
         // 2. PROCESAR GATEWAY (si se envió uno)
         // ============================================================
@@ -1392,30 +1394,67 @@ function recibirReporteMejorado(token, datos, archivos, ubicacion) {
             console.log('📦 Resultado instalación de gateway:', JSON.stringify(resultadoGateway));
           }
         }
-        
+
         // ============================================================
-        // 3. PROCESAR RETIRO DE EQUIPO (si se especificó)
+        // 3. PROCESAR ACCESORIOS ✅ NUEVO
+        // ============================================================
+        if (accesoriosForm && typeof accesoriosForm === 'object') {
+          console.log('🔧 Procesando cambios de accesorios...');
+          
+          // Obtener accesorios actuales del vehículo
+          var accesoriosActuales = _obtenerAccesoriosPorEconomico(economico);
+          console.log('📌 Accesorios actuales en', economico, ':', accesoriosActuales);
+          
+          // Obtener accesorios nuevos del formulario
+          var accesoriosNuevos = accesoriosForm;
+          console.log('📌 Accesorios nuevos enviados:', accesoriosNuevos);
+          
+          // Para cada accesorio en el formulario
+          for (var accKey in accesoriosNuevos) {
+            if (accesoriosNuevos.hasOwnProperty(accKey)) {
+              var estaSeleccionado = accesoriosNuevos[accKey] === true;
+              var estabaSeleccionado = accesoriosActuales[accKey] === true;
+              
+              if (estaSeleccionado && !estabaSeleccionado) {
+                // ✅ Se agregó un accesorio → Asignar al vehículo
+                console.log('➕ Agregando accesorio:', accKey, 'a', economico);
+                _asignarAccesorioAVehiculo(accKey, economico);
+              } else if (!estaSeleccionado && estabaSeleccionado) {
+                // ✅ Se quitó un accesorio → Desasignar del vehículo
+                console.log('➖ Quitando accesorio:', accKey, 'de', economico);
+                _desasignarAccesorioDeVehiculo(accKey, economico);
+              } else {
+                console.log('ℹ️ Accesorio sin cambios:', accKey);
+              }
+            }
+          }
+        } else {
+          console.log('ℹ️ No se enviaron accesorios en el formulario.');
+        }
+
+        // ============================================================
+        // 4. PROCESAR RETIRO DE EQUIPO (si se especificó)
         // ============================================================
         if (equipoRetirado) {
           console.log('🗑️ Retirando equipo:', equipoRetirado);
           var resultadoRetiro = _actualizarEstadoGPSDesinstalacion(equipoRetirado);
           console.log('📦 Resultado retiro:', JSON.stringify(resultadoRetiro));
         }
-        
+
         // ============================================================
-        // 4. SI ES SOLO DIAGNÓSTICO
+        // 5. SI ES SOLO DIAGNÓSTICO
         // ============================================================
         if (soloDiagnostico) {
           console.log('ℹ️ Solo diagnóstico, no se afecta inventario.');
         }
-        
+
         // ============================================================
-        // 5. SI NO HAY NINGÚN CAMBIO
+        // 6. SI NO HAY NINGÚN CAMBIO
         // ============================================================
         if (!camara && !camaraNueva && !gatewayNuevo && !serieGPS && !equipoRetirado && !soloDiagnostico) {
           console.log('ℹ️ No se detectaron cambios en inventario para esta Revisión.');
         }
-        
+
       } catch (invError) {
         console.warn('⚠️ Error al actualizar inventario (Revisión):', invError.message);
       }
@@ -8576,6 +8615,138 @@ function obtenerAccesoriosStock(token) {
 
   } catch (err) {
     console.error('❌ Error en obtenerAccesoriosStock:', err);
+    return { ok: false, error: err.message };
+  }
+}
+function agregarAccesoriosATiposEquipo() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('📋_Tipos_Equipo');
+    
+    if (!sheet) {
+      console.error('❌ No se encontró la hoja 📋_Tipos_Equipo');
+      return;
+    }
+
+    // Datos de accesorios a agregar (mismos nombres que en 🔧_Accesorios_Stock)
+    var accesorios = [
+      ['ARNES_VG34', 'Arnés VG34', 'Accesorio', true],
+      ['ARNES_VG54', 'Arnés VG54/55', 'Accesorio', true],
+      ['BTN_1.0', 'Botón 1.0', 'Accesorio', true],
+      ['BTN_2.0', 'Botón 2.0', 'Accesorio', true],
+      ['EI_1.0', 'Corte de motor EI1.0', 'Accesorio', true],
+      ['EI_2.0', 'Corte de motor EI2.0', 'Accesorio', true]
+    ];
+
+    // Verificar si ya existen para no duplicar
+    var datosExistentes = sheet.getDataRange().getValues();
+    var clavesExistentes = {};
+    for (var i = 1; i < datosExistentes.length; i++) {
+      var clave = datosExistentes[i][0];
+      if (clave) {
+        clavesExistentes[clave.toString().toUpperCase().trim()] = true;
+      }
+    }
+
+    var agregados = 0;
+    var fila = sheet.getLastRow() + 1;
+
+    accesorios.forEach(function(acc) {
+      var clave = acc[0].toString().toUpperCase().trim();
+      if (!clavesExistentes[clave]) {
+        sheet.getRange(fila, 1, 1, acc.length).setValues([acc]);
+        console.log('✅ Accesorio agregado:', acc[0]);
+        fila++;
+        agregados++;
+      } else {
+        console.log('ℹ️ Accesorio ya existe:', acc[0]);
+      }
+    });
+
+    console.log('✅ Total accesorios agregados:', agregados);
+
+  } catch (err) {
+    console.error('❌ Error al agregar accesorios:', err);
+  }
+}
+// ============================================================
+// GESTIÓN DE ACCESORIOS
+// ============================================================
+
+/**
+ * Asigna un accesorio a un vehículo
+ */
+function _asignarAccesorioAVehiculo(accesorioNombre, economico) {
+  try {
+    var sheet = SHEETS.ACCESORIOS();
+    if (!sheet) return { ok: false, error: 'No se encontró la hoja de Accesorios' };
+
+    var datos = sheet.getDataRange().getValues();
+    var encontrado = false;
+
+    for (var i = 1; i < datos.length; i++) {
+      var nombre = datos[i][0] || '';
+      if (nombre.toString().trim() === accesorioNombre) {
+        var economicoAsignado = datos[i][5] || '';
+        var lista = economicoAsignado ? economicoAsignado.split(',').map(function(e) { return e.trim(); }) : [];
+        
+        // Agregar económico si no está ya
+        if (lista.indexOf(economico) === -1) {
+          lista.push(economico);
+          var nuevoValor = lista.join(', ');
+          sheet.getRange(i + 1, 6).setValue(nuevoValor); // ECONOMICO_ASIGNADO
+          sheet.getRange(i + 1, 4).setValue(lista.length); // ASIGNADOS
+          sheet.getRange(i + 1, 5).setValue((datos[i][2] || 0) - lista.length); // DISPONIBLES
+          console.log('✅ Accesorio asignado:', accesorioNombre, 'a', economico);
+          encontrado = true;
+        }
+        break;
+      }
+    }
+
+    if (!encontrado) {
+      console.warn('⚠️ Accesorio no encontrado:', accesorioNombre);
+    }
+
+    return { ok: true };
+
+  } catch (err) {
+    console.error('❌ Error en _asignarAccesorioAVehiculo:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Desasigna un accesorio de un vehículo
+ */
+function _desasignarAccesorioDeVehiculo(accesorioNombre, economico) {
+  try {
+    var sheet = SHEETS.ACCESORIOS();
+    if (!sheet) return { ok: false, error: 'No se encontró la hoja de Accesorios' };
+
+    var datos = sheet.getDataRange().getValues();
+
+    for (var i = 1; i < datos.length; i++) {
+      var nombre = datos[i][0] || '';
+      if (nombre.toString().trim() === accesorioNombre) {
+        var economicoAsignado = datos[i][5] || '';
+        var lista = economicoAsignado ? economicoAsignado.split(',').map(function(e) { return e.trim(); }) : [];
+        
+        // Quitar el económico de la lista
+        var nuevaLista = lista.filter(function(e) { return e !== economico; });
+        var nuevoValor = nuevaLista.join(', ');
+        sheet.getRange(i + 1, 6).setValue(nuevoValor); // ECONOMICO_ASIGNADO
+        sheet.getRange(i + 1, 4).setValue(nuevaLista.length); // ASIGNADOS
+        sheet.getRange(i + 1, 5).setValue((datos[i][2] || 0) - nuevaLista.length); // DISPONIBLES
+        console.log('✅ Accesorio desasignado:', accesorioNombre, 'de', economico);
+        break;
+      }
+    }
+
+    return { ok: true };
+
+  } catch (err) {
+    console.error('❌ Error en _desasignarAccesorioDeVehiculo:', err);
     return { ok: false, error: err.message };
   }
 }
