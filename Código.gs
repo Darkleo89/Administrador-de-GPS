@@ -3704,13 +3704,87 @@ function exportarInventarioExcel(token) {
     return { ok: false, error: 'Error al exportar: ' + err.message };
   }
 }
+/**
+ * Agrega un nuevo equipo al inventario GPS
+ * @param {string} token - Token de sesión
+ * @param {Object} equipo - Datos del equipo { serie, tipo, modelo, imei, estado, economico, observaciones }
+ * @returns {Object} { ok: boolean, mensaje: string }
+ */
 function agregarEquipoInventario(token, equipo) {
-  var sesionResp = validarSesion(token);
-  if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-  if (sesionResp.sesion.rol > 1) return { ok: false, error: 'Solo Administradores pueden agregar equipos.' };
+  try {
+    // 1. Validar sesión
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
 
-  // TODO: Agregar el equipo a la hoja de inventario
-  return { ok: true };
+    // 2. Validar permisos (solo Admin)
+    if (sesionResp.sesion.rol !== 1) {
+      return { ok: false, error: 'Solo Administradores pueden agregar equipos.' };
+    }
+
+    // 3. Validar datos del equipo
+    if (!equipo || !equipo.serie) {
+      return { ok: false, error: 'La serie es obligatoria.' };
+    }
+
+    // 4. Obtener hoja de inventario
+    var sheet = SHEETS.INVENTARIO();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Inventario' };
+    }
+
+    // 5. Verificar que la serie no exista
+    var datosExistentes = sheet.getDataRange().getValues();
+    var serieNueva = equipo.serie.toString().toUpperCase().trim();
+
+    for (var i = 1; i < datosExistentes.length; i++) {
+      var serieExistente = datosExistentes[i][0] || '';
+      if (serieExistente.toString().toUpperCase().trim() === serieNueva) {
+        return { ok: false, error: 'La serie ' + equipo.serie + ' ya existe en el inventario.' };
+      }
+    }
+
+    // 6. Preparar datos para la nueva fila
+    var fechaActual = new Date();
+    var filaData = [
+      equipo.serie.toUpperCase(),                     // Columna A - SERIE_GPS
+      equipo.tipo || '',                              // Columna B - TIPO_EQUIPO
+      equipo.modelo || '',                            // Columna C - MODELO
+      equipo.imei || '',                              // Columna D - IMEI
+      equipo.estado || 'Disponible',                  // Columna E - ESTADO
+      equipo.economico || '',                         // Columna F - ECONOMICO_ASIGNADO
+      equipo.estado === 'Instalado' ? fechaActual : '', // Columna G - FECHA_INSTALACION
+      '',                                             // Columna H - TICKET_GARANTIA
+      '',                                             // Columna I - FECHA_GARANTIA
+      fechaActual,                                    // Columna J - ULTIMA_ACTUALIZACION
+      equipo.observaciones || '',                     // Columna K - OBSERVACIONES
+      equipo.tipoUnidad || ''                         // Columna L - TIPO_UNIDAD
+    ];
+
+    // 7. Agregar la nueva fila
+    var nuevaFila = sheet.getLastRow() + 1;
+    sheet.getRange(nuevaFila, 1, 1, filaData.length).setValues([filaData]);
+
+    // 8. Log de auditoría
+    _registrarAuditoria(
+      sesionResp.sesion.usuarioId,
+      sesionResp.sesion.nombre,
+      'AGREGAR_EQUIPO',
+      'INVENTARIO',
+      'Equipo agregado: ' + equipo.serie + ' (Tipo: ' + equipo.tipo + ', Estado: ' + equipo.estado + ')',
+      equipo.serie,
+      '',
+      ''
+    );
+
+    console.log('✅ Equipo agregado correctamente:', equipo.serie);
+    return { ok: true, mensaje: 'Equipo agregado correctamente' };
+
+  } catch (err) {
+    console.error('❌ Error en agregarEquipoInventario:', err);
+    return { ok: false, error: 'Error al agregar equipo: ' + err.message };
+  }
 }
 // ============================================================
 // REPORTE DE UNIDADES CON SERIES (FACTURACIÓN)
@@ -3933,7 +4007,7 @@ function obtenerTiposUnidad(token) {
   try {
     var sheet = SS.getSheetByName('📋_Tipos_Unidad');
     if (!sheet) {
-      // Si no existe la hoja, crearla con valores por defecto
+      // ✅ Si no existe la hoja, crearla con valores por defecto
       SS.insertSheet('📋_Tipos_Unidad');
       var newSheet = SS.getSheetByName('📋_Tipos_Unidad');
       newSheet.appendRow(['Tipo']);
@@ -8545,20 +8619,27 @@ function _actualizarEstadoGPSReemplazo(serieVieja, serieNueva, economico) {
 // ============================================================
 
 /**
- * Obtiene la lista de accesorios desde la hoja 🔧_Accesorios_Stock
+ * Obtiene todos los accesorios de la hoja 🔧_Accesorios_Stock
  * @param {string} token - Token de sesión
- * @returns {Object} { ok, accesorios: [] }
+ * @returns {Object} { ok: true, accesorios: [...] }
  */
 function obtenerAccesoriosStock(token) {
   try {
+    // Validar sesión
     var sesionResp = validarSesion(token);
     if (!sesionResp.ok) {
       return { ok: false, error: sesionResp.error };
     }
 
-    var sheet = SHEETS.ACCESORIOS();
+    // Obtener hoja
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('🔧_Accesorios_Stock');
     if (!sheet) {
-      return { ok: false, error: 'No se encontró la hoja 🔧_Accesorios_Stock' };
+      // Intentar con el nombre alternativo
+      sheet = ss.getSheetByName('_Accesorios_Stock');
+    }
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de accesorios' };
     }
 
     var datos = sheet.getDataRange().getValues();
@@ -8566,34 +8647,163 @@ function obtenerAccesoriosStock(token) {
 
     // Saltar encabezado
     for (var i = 1; i < datos.length; i++) {
-      var accesorio = datos[i][0];
-      var tipo = datos[i][1];
-      var stockTotal = datos[i][2];
-      var asignados = datos[i][3];
-      var disponibles = datos[i][4];
-      var economicoAsignado = datos[i][5];
-      var fechaAsignacion = datos[i][6];
-      var observaciones = datos[i][7];
+      var nombre = datos[i][0];
+      if (!nombre) continue;
 
-      if (accesorio) {
-        accesorios.push({
-          clave: accesorio.toString().trim(),
-          nombre: accesorio.toString().trim(),
-          descripcion: tipo ? tipo.toString().trim() : '',
-          stockTotal: stockTotal || 0,
-          asignados: asignados || 0,
-          disponibles: disponibles || 0,
-          economicoAsignado: economicoAsignado ? economicoAsignado.toString().trim() : '',
-          fechaAsignacion: fechaAsignacion || '',
-          observaciones: observaciones || ''
-        });
-      }
+      accesorios.push({
+        id: i.toString(),
+        nombre: nombre.toString().trim(),
+        tipo: datos[i][1] ? datos[i][1].toString().trim() : '',
+        stockTotal: datos[i][2] || 0,
+        asignados: datos[i][3] || 0,
+        disponibles: datos[i][4] || 0,
+        economicoAsignado: datos[i][5] ? datos[i][5].toString().trim() : '',
+        descripcion: datos[i][7] ? datos[i][7].toString().trim() : ''
+      });
     }
 
     return { ok: true, accesorios: accesorios };
 
   } catch (err) {
     console.error('❌ Error en obtenerAccesoriosStock:', err);
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Agrega un nuevo accesorio
+ */
+function agregarAccesorioStock(token, datos) {
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    if (sesionResp.sesion.rol > 2) {
+      return { ok: false, error: 'Sin permisos para agregar accesorios.' };
+    }
+
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('🔧_Accesorios_Stock');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja 🔧_Accesorios_Stock' };
+    }
+
+    var nuevaFila = sheet.getLastRow() + 1;
+    var disponibles = (datos.stockTotal || 0) - (datos.asignados || 0);
+
+    sheet.getRange(nuevaFila, 1, 1, 8).setValues([[
+      datos.nombre || '',
+      datos.tipo || '',
+      datos.stockTotal || 0,
+      datos.asignados || 0,
+      disponibles,
+      '', // ECONOMICO_ASIGNADO
+      new Date(),
+      datos.descripcion || ''
+    ]]);
+
+    _registrarAuditoria(
+      sesionResp.sesion.usuarioId,
+      sesionResp.sesion.nombre,
+      'AGREGAR_ACCESORIO',
+      'ACCESORIOS',
+      'Accesorio agregado: ' + datos.nombre,
+      '',
+      '',
+      ''
+    );
+
+    return { ok: true, mensaje: 'Accesorio agregado correctamente' };
+
+  } catch (err) {
+    console.error('❌ Error en agregarAccesorioStock:', err);
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Actualiza un accesorio existente
+ */
+function actualizarAccesorioStock(token, id, datos) {
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    if (sesionResp.sesion.rol > 2) {
+      return { ok: false, error: 'Sin permisos para editar accesorios.' };
+    }
+
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('🔧_Accesorios_Stock');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja 🔧_Accesorios_Stock' };
+    }
+
+    var fila = parseInt(id) + 1;
+    var disponibles = (datos.stockTotal || 0) - (datos.asignados || 0);
+
+    sheet.getRange(fila, 1).setValue(datos.nombre || '');
+    sheet.getRange(fila, 2).setValue(datos.tipo || '');
+    sheet.getRange(fila, 3).setValue(datos.stockTotal || 0);
+    sheet.getRange(fila, 4).setValue(datos.asignados || 0);
+    sheet.getRange(fila, 5).setValue(disponibles);
+    sheet.getRange(fila, 8).setValue(datos.descripcion || '');
+
+    _registrarAuditoria(
+      sesionResp.sesion.usuarioId,
+      sesionResp.sesion.nombre,
+      'EDITAR_ACCESORIO',
+      'ACCESORIOS',
+      'Accesorio editado: ' + datos.nombre,
+      '',
+      '',
+      ''
+    );
+
+    return { ok: true, mensaje: 'Accesorio actualizado correctamente' };
+
+  } catch (err) {
+    console.error('❌ Error en actualizarAccesorioStock:', err);
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Elimina un accesorio
+ */
+function eliminarAccesorioStock(token, id) {
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    if (sesionResp.sesion.rol > 2) {
+      return { ok: false, error: 'Sin permisos para eliminar accesorios.' };
+    }
+
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('🔧_Accesorios_Stock');
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja 🔧_Accesorios_Stock' };
+    }
+
+    var fila = parseInt(id) + 1;
+    sheet.deleteRow(fila);
+
+    _registrarAuditoria(
+      sesionResp.sesion.usuarioId,
+      sesionResp.sesion.nombre,
+      'ELIMINAR_ACCESORIO',
+      'ACCESORIOS',
+      'Accesorio eliminado (ID: ' + id + ')',
+      '',
+      '',
+      ''
+    );
+
+    return { ok: true, mensaje: 'Accesorio eliminado correctamente' };
+
+  } catch (err) {
+    console.error('❌ Error en eliminarAccesorioStock:', err);
     return { ok: false, error: err.message };
   }
 }
@@ -8738,6 +8948,101 @@ function _desasignarAccesorioDeVehiculo(accesorioNombre, economico) {
 
   } catch (err) {
     console.error('❌ Error en _desasignarAccesorioDeVehiculo:', err);
+    return { ok: false, error: err.message };
+  }
+}
+/**
+ * Verifica si una serie GPS ya existe en el inventario
+ * @param {string} token - Token de sesión
+ * @param {string} serie - Serie a verificar
+ * @returns {Object} { ok: true, existe: boolean }
+ */
+function verificarSerieInventario(token, serie) {
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    var sheet = SHEETS.INVENTARIO();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Inventario' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var serieLimpia = serie.toString().toUpperCase().trim();
+
+    for (var i = 1; i < datos.length; i++) {
+      var serieCelda = datos[i][0] || '';
+      var serieCeldaLimpia = serieCelda.toString().toUpperCase().trim();
+      if (serieCeldaLimpia === serieLimpia) {
+        return { ok: true, existe: true };
+      }
+    }
+
+    return { ok: true, existe: false };
+
+  } catch (err) {
+    console.error('❌ Error en verificarSerieInventario:', err);
+    return { ok: false, error: err.message };
+  }
+}
+function testObtenerAccesoriosStock() {
+  // Obtener un token válido (reemplaza con un token real de tu sesión)
+  var token = 'TU_TOKEN_AQUI';
+  var resultado = obtenerAccesoriosStock(token);
+  console.log('Resultado:', JSON.stringify(resultado));
+}
+/**
+ * Obtiene las fotos de una carpeta de Drive
+ * @param {string} token - Token de sesión
+ * @param {string} folderId - ID de la carpeta en Drive
+ * @returns {Object} { ok: true, fotos: [...] }
+ */
+function obtenerFotosCarpeta(token, folderId) {
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    var folder = DriveApp.getFolderById(folderId);
+    var files = folder.getFiles();
+    var fotos = [];
+
+    while (files.hasNext()) {
+      var file = files.next();
+      var mimeType = file.getMimeType();
+      
+      if (mimeType.startsWith('image/')) {
+        var fileId = file.getId();
+        
+        // ✅ URL de vista previa (para iframe)
+        var previewUrl = 'https://drive.google.com/file/d/' + fileId + '/preview';
+        
+        // ✅ URL de miniatura
+        var thumbnailUrl = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w256-h256';
+        
+        // ✅ URL de vista (para abrir en nueva pestaña)
+        var viewUrl = 'https://drive.google.com/file/d/' + fileId + '/view';
+        
+        fotos.push({
+          nombre: file.getName(),
+          url: previewUrl,        // ✅ URL para el modal
+          viewUrl: viewUrl,       // ✅ URL para abrir en nueva pestaña
+          thumbnail: thumbnailUrl,
+          id: fileId,
+          mimeType: mimeType
+        });
+        
+        if (fotos.length >= 20) break;
+      }
+    }
+
+    return { ok: true, fotos: fotos };
+
+  } catch (err) {
+    console.error('❌ Error en obtenerFotosCarpeta:', err);
     return { ok: false, error: err.message };
   }
 }

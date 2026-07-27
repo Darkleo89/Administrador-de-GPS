@@ -323,7 +323,60 @@ function iniciarApp() {
   const rolesLabel = { 1: 'Administrador', 2: 'Revisor', 3: 'Técnico' };
   document.getElementById('badge-rol').textContent = rolesLabel[rol] || 'Usuario';
 
-  // Mostrar secciones según rol
+  // ============================================================
+  // 1. PANELES PARA TÉCNICOS Y ADMIN (NO Revisor)
+  // ============================================================
+  if (rol === 1 || rol === 3) {
+    // Nuevo Reporte
+    var navNuevo = document.querySelector('[data-panel="panel-nuevo"]');
+    if (navNuevo) navNuevo.classList.remove('d-none');
+    var bnavNuevo = document.querySelector('.fm-bottom-nav [data-panel="panel-nuevo"]');
+    if (bnavNuevo) bnavNuevo.classList.remove('d-none');
+
+    // Mis Borradores
+    var navBorradores = document.querySelector('[data-panel="panel-borradores"]');
+    if (navBorradores) navBorradores.classList.remove('d-none');
+    var bnavBorradores = document.querySelector('.fm-bottom-nav [data-panel="panel-borradores"]');
+    if (bnavBorradores) bnavBorradores.classList.remove('d-none');
+
+    // Mis Registros
+    var navMisRegistros = document.querySelector('[data-panel="panel-mis-registros"]');
+    if (navMisRegistros) navMisRegistros.classList.remove('d-none');
+    var bnavMisRegistros = document.querySelector('.fm-bottom-nav [data-panel="panel-mis-registros"]');
+    if (bnavMisRegistros) bnavMisRegistros.classList.remove('d-none');
+
+    // Mi Historial
+    var navHistorial = document.querySelector('[data-panel="panel-historial"]');
+    if (navHistorial) navHistorial.classList.remove('d-none');
+    var bnavHistorial = document.querySelector('.fm-bottom-nav [data-panel="panel-historial"]');
+    if (bnavHistorial) bnavHistorial.classList.remove('d-none');
+
+  } else {
+    // ❌ Ocultar para Revisor
+    var navNuevo = document.querySelector('[data-panel="panel-nuevo"]');
+    if (navNuevo) navNuevo.classList.add('d-none');
+    var bnavNuevo = document.querySelector('.fm-bottom-nav [data-panel="panel-nuevo"]');
+    if (bnavNuevo) bnavNuevo.classList.add('d-none');
+
+    var navBorradores = document.querySelector('[data-panel="panel-borradores"]');
+    if (navBorradores) navBorradores.classList.add('d-none');
+    var bnavBorradores = document.querySelector('.fm-bottom-nav [data-panel="panel-borradores"]');
+    if (bnavBorradores) bnavBorradores.classList.add('d-none');
+
+    var navMisRegistros = document.querySelector('[data-panel="panel-mis-registros"]');
+    if (navMisRegistros) navMisRegistros.classList.add('d-none');
+    var bnavMisRegistros = document.querySelector('.fm-bottom-nav [data-panel="panel-mis-registros"]');
+    if (bnavMisRegistros) bnavMisRegistros.classList.add('d-none');
+
+    var navHistorial = document.querySelector('[data-panel="panel-historial"]');
+    if (navHistorial) navHistorial.classList.add('d-none');
+    var bnavHistorial = document.querySelector('.fm-bottom-nav [data-panel="panel-historial"]');
+    if (bnavHistorial) bnavHistorial.classList.add('d-none');
+  }
+
+  // ============================================================
+  // 2. PANELES PARA ADMIN Y REVISOR (NO Técnico)
+  // ============================================================
   if (rol <= 2) {
     document.getElementById('nav-registros').classList.remove('d-none');
     document.getElementById('bnav-registros').classList.remove('d-none');
@@ -332,53 +385,75 @@ function iniciarApp() {
     document.getElementById('bnav-flotilla').classList.remove('d-none');
     document.getElementById('nav-usuarios').classList.remove('d-none');
     document.getElementById('bnav-usuarios').classList.remove('d-none');
-    document.getElementById('nav-configuracion').classList.remove('d-none');
-    document.getElementById('bnav-configuracion').classList.remove('d-none');
-    document.getElementById('nav-auditoria').classList.remove('d-none');
-    document.getElementById('bnav-auditoria').classList.remove('d-none');
     
     cargarTecnicosFiltro();
   }
 
   // ============================================================
-  // ✅ NUEVO: Mostrar Administración de BD (solo Administradores)
+  // 3. PANELES SOLO PARA ADMINISTRADOR
   // ============================================================
   if (rol === 1) {
+    // Administrar BD
     var navAdminBD = document.getElementById('nav-admin-bd');
     if (navAdminBD) navAdminBD.classList.remove('d-none');
-    
     var bnavAdminBD = document.getElementById('bnav-admin-bd');
     if (bnavAdminBD) bnavAdminBD.classList.remove('d-none');
     
+    // ✅ Configuración (solo Admin)
+    document.getElementById('nav-configuracion').classList.remove('d-none');
+    document.getElementById('bnav-configuracion').classList.remove('d-none');
+    
+    // ✅ Auditoría (solo Admin)
+    document.getElementById('nav-auditoria').classList.remove('d-none');
+    document.getElementById('bnav-auditoria').classList.remove('d-none');
+    
+    // Botón Agregar equipo
+    var btnAgregar = document.getElementById('btn-agregar-equipo');
+    if (btnAgregar) btnAgregar.classList.remove('d-none');
+
     // Verificar estado automáticamente al iniciar
     setTimeout(function() {
       if (typeof verificarEstado === 'function') {
         verificarEstado();
       }
     }, 1000);
+  } else {
+    // ❌ Ocultar Configuración y Auditoría para Revisor y Técnico
+    document.getElementById('nav-configuracion').classList.add('d-none');
+    document.getElementById('bnav-configuracion').classList.add('d-none');
+    document.getElementById('nav-auditoria').classList.add('d-none');
+    document.getElementById('bnav-auditoria').classList.add('d-none');
   }
 
-  // Botón Agregar equipo (solo Admin)
-  if (rol === 1) {
-    var btnAgregar = document.getElementById('btn-agregar-equipo');
-    if (btnAgregar) btnAgregar.classList.remove('d-none');
+  // ============================================================
+  // 4. BOTÓN ADMINISTRAR ACCESORIOS (Admin y Revisor)
+  // ============================================================
+  if (rol <= 2) {
+    var btnAccesorios = document.getElementById('btn-admin-accesorios');
+    if (btnAccesorios) btnAccesorios.classList.remove('d-none');
   }
 
-  // Mostrar panel de tickets
+  // ============================================================
+  // 5. MOSTRAR PANEL DE TICKETS (Todos los roles)
+  // ============================================================
   var ticketNav = document.querySelector('[data-panel="panel-tickets"]');
   if (ticketNav) ticketNav.classList.remove('d-none');
 
   var ticketBNav = document.querySelector('.fm-bottom-nav [data-panel="panel-tickets"]');
   if (ticketBNav) ticketBNav.classList.remove('d-none');
 
-  // Cargar tipos de equipo
+  // ============================================================
+  // 6. CARGAR TIPOS DE EQUIPO
+  // ============================================================
   if (APP.token) {
     cargarTiposEquipo();
   } else {
     setTimeout(function() { if (APP.token) cargarTiposEquipo(); }, 1000);
   }
 
-  // ✅ CARGAR DASHBOARD UNA SOLA VEZ (con retraso para asegurar DOM)
+  // ============================================================
+  // 7. CARGAR DASHBOARD
+  // ============================================================
   setTimeout(function() {
     cargarDashboard();
   }, 500);
@@ -393,13 +468,18 @@ function iniciarApp() {
     mostrarPanelPorId('panel-dashboard');
   }
 
-  // Cargar historial en segundo plano
-  cargarHistorial();
-
-  // Iniciar polling de notificaciones
+  // ============================================================
+  // 8. CARGAR HISTORIAL Y NOTIFICACIONES
+  // ============================================================
+  // Solo cargar historial si NO es Revisor
+  if (rol !== 2) {
+    cargarHistorial();
+  }
   iniciarPollingNotificaciones();
 
-  // ✅ CARGAR FILTROS DE FLOTILLA (solo cuando existan)
+  // ============================================================
+  // 9. CARGAR FILTROS DE FLOTILLA E INVENTARIO
+  // ============================================================
   setTimeout(function() {
     if (document.getElementById('fil-flotilla-estado')) {
       cargarEstadosVehiculoEnFiltro('fil-flotilla-estado');
@@ -409,10 +489,15 @@ function iniciarApp() {
     }
   }, 1000);
 
+  setTimeout(function() {
+    if (document.getElementById('fil-inv-tipo-unidad')) {
+      cargarTiposUnidadEnFiltro('fil-inv-tipo-unidad');
+    }
+  }, 1000);
+
   // ============================================================
-  // ✅ PRECARGA EN SEGUNDO PLANO (con retrasos y validaciones)
+  // 10. PRECARGA EN SEGUNDO PLANO
   // ============================================================
-  
   if (rol <= 2) {
     setTimeout(function() {
       console.log('🔄 Precargando registros en segundo plano...');
@@ -483,7 +568,7 @@ function mostrarPanel(el) {
   if (panelId === 'panel-registros') cargarRegistros();
   if (panelId === 'panel-borradores') cargarBorradores();
   if (panelId === 'panel-inventario') {
-    cargarTiposUnidadEnFiltro();
+    cargarTiposUnidadEnFiltro('fil-inv-tipo-unidad');
     cargarInventario();
   }
   if (panelId === 'panel-dashboard') {
@@ -1464,13 +1549,16 @@ function renderRegistros(registros) {
     var badgeCls = badgeClase(r.ESTADO);
     var fecha = formatFecha(r.FECHA_SERVICIO);
 
+    // ✅ OBTENER CLASE PARA EL BADGE DE TIPO
+    var tipoBadgeCls = obtenerClaseTipo(r.TIPO_REVISION);
+
     // Fila de tabla (escritorio)
     var tr = document.createElement('tr');
     tr.innerHTML = `
       <td><code>${r.FOLIO}</code></td>
       <td>${fecha}</td>
       <td>${r.ECONOMICO}</td>
-      <td><span class="badge">${r.TIPO_REVISION}</span></td>
+      <td><span class="badge ${tipoBadgeCls}">${r.TIPO_REVISION}</span></td>
       <td>${r.TECNICO_NOMBRE}</td>
       <td>$${r.PRECIO_UNITARIO || '—'}</td>
       <td><span class="badge ${badgeCls}">${r.ESTADO}</span></td>
@@ -1492,7 +1580,7 @@ function renderRegistros(registros) {
         <span class="folio">${r.FOLIO}</span>
         <span class="badge ${badgeCls}">${r.ESTADO}</span>
       </div>
-      <div class="meta">${fecha} · ${r.ECONOMICO} · ${r.TIPO_REVISION}</div>
+      <div class="meta">${fecha} · ${r.ECONOMICO} · <span class="badge ${tipoBadgeCls}">${r.TIPO_REVISION}</span></div>
       <div class="meta">${r.TECNICO_NOMBRE}</div>
       <div class="d-flex justify-content-between align-items-center mt-2">
         <strong>$${r.PRECIO_UNITARIO || '—'}</strong>
@@ -1505,13 +1593,74 @@ function renderRegistros(registros) {
 
   tbody.appendChild(fragment);
 }
-
+/**
+ * Devuelve la clase CSS para el badge de tipo de revisión
+ * @param {string} tipo - Tipo de revisión (IT, R, IM, Pendiente, etc.)
+ * @returns {string} Clase CSS para el badge
+ */
+function obtenerClaseTipo(tipo) {
+  if (!tipo) return 'badge bg-secondary text-white';
+  
+  var tipoUpper = tipo.toString().toUpperCase().trim();
+  
+  // ✅ MAPEO DE TIPOS CON COLORES DISTINTOS
+  var clases = {
+    'IT': 'badge bg-primary text-white',
+    'R': 'badge bg-info text-white',
+    'IM': 'badge bg-warning text-dark',
+    'PENDIENTE': 'badge bg-secondary text-white',
+    'INSTALACION': 'badge bg-success text-white',
+    'REVISION': 'badge bg-info text-white',
+    'DESINSTALACION': 'badge bg-danger text-white',
+    'CM': 'badge bg-purple text-white',
+    'MC': 'badge bg-teal text-white',
+    'MP': 'badge bg-cyan text-white',
+    'DI': 'badge bg-orange text-dark'
+  };
+  
+  // Buscar coincidencia exacta
+  if (clases[tipoUpper]) {
+    return clases[tipoUpper];
+  }
+  
+  // Buscar coincidencia parcial
+  if (tipoUpper.indexOf('IT') !== -1) return 'badge bg-primary text-white';
+  if (tipoUpper.indexOf('R') !== -1 && tipoUpper.length <= 2) return 'badge bg-info text-white';
+  if (tipoUpper.indexOf('IM') !== -1) return 'badge bg-warning text-dark';
+  if (tipoUpper.indexOf('PENDIENTE') !== -1) return 'badge bg-secondary text-white';
+  if (tipoUpper.indexOf('INSTALACION') !== -1) return 'badge bg-success text-white';
+  if (tipoUpper.indexOf('DESINSTALACION') !== -1) return 'badge bg-danger text-white';
+  
+  // Por defecto, gris con texto blanco para que sea visible
+  return 'badge bg-secondary text-white';
+}
 function abrirDetalle(reg) {
   const rol = APP.sesion.rol;
   document.getElementById('modal-folio-title').textContent = 'Folio ' + reg.FOLIO;
 
   const esEditable = rol <= 2 && reg.ESTADO !== 'Pagado';
   const tipoActual = reg.TIPO_REVISION === 'PENDIENTE' ? '' : reg.TIPO_REVISION;
+
+  // ✅ GENERAR HTML DE FOTOS (si hay URL)
+  var fotosHtml = '';
+  if (reg.FOTOS_DRIVE_URL) {
+    fotosHtml = `
+      <div class="col-12">
+        <label class="form-label small text-muted">📷 Fotos del reporte</label>
+        <div id="galeria-fotos" class="row g-2" style="max-height: 300px; overflow-y: auto;">
+          <div class="col-12 text-center text-muted small py-3">
+            <div class="spinner-border spinner-border-sm me-2"></div>
+            Cargando fotos...
+          </div>
+        </div>
+        <div class="mt-1">
+          <a href="${reg.FOTOS_DRIVE_URL}" target="_blank" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-folder2-open me-1"></i>Ver todas en Drive
+          </a>
+        </div>
+      </div>
+    `;
+  }
 
   document.getElementById('modal-body-content').innerHTML = `
     <div class="row g-3">
@@ -1562,10 +1711,7 @@ function abrirDetalle(reg) {
           ? `<textarea id="edit-notas" class="form-control" rows="2">${reg.NOTAS_REVISOR || ''}</textarea>`
           : `<p>${reg.NOTAS_REVISOR || '—'}</p>`}
       </div>
-      ${reg.FOTOS_DRIVE_URL
-        ? `<div class="col-12"><a href="${reg.FOTOS_DRIVE_URL}" target="_blank" class="btn btn-sm btn-outline-secondary">
-             <i class="bi bi-folder2-open me-1"></i>Ver fotos en Drive</a></div>`
-        : ''}
+      ${fotosHtml}
     </div>`;
 
   let footerHtml = `<button class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>`;
@@ -1583,8 +1729,166 @@ function abrirDetalle(reg) {
   }
   document.getElementById('modal-footer-content').innerHTML = footerHtml;
   APP.modal.show();
-}
 
+  // ✅ CARGAR FOTOS DESPUÉS DE MOSTRAR EL MODAL
+  if (reg.FOTOS_DRIVE_URL) {
+    cargarFotosEnModal(reg.FOTOS_DRIVE_URL);
+  }
+}
+/**
+ * Carga las fotos de una carpeta de Drive y las muestra en el modal
+ * @param {string} folderUrl - URL de la carpeta en Drive
+ */
+/**
+ * Carga las fotos de una carpeta de Drive y las muestra en el modal
+ * @param {string} folderUrl - URL de la carpeta en Drive
+ */
+function cargarFotosEnModal(folderUrl) {
+  if (!folderUrl) return;
+
+  var container = document.getElementById('galeria-fotos');
+  if (!container) return;
+
+  // Extraer el ID de la carpeta
+  var folderId = folderUrl.match(/[-\w]{25,}/)?.[0];
+  if (!folderId) {
+    container.innerHTML = `
+      <div class="col-12 text-center text-muted small py-2">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        No se pudieron cargar las fotos
+      </div>
+    `;
+    return;
+  }
+
+  // ✅ Mostrar loading
+  container.innerHTML = `
+    <div class="col-12 text-center text-muted small py-3">
+      <div class="spinner-border spinner-border-sm me-2"></div>
+      Cargando fotos...
+    </div>
+  `;
+
+  // Llamar al backend para obtener las fotos
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      console.log('✅ Fotos cargadas:', resp);
+      
+      if (!resp.ok || !resp.fotos || resp.fotos.length === 0) {
+        container.innerHTML = `
+          <div class="col-12 text-center text-muted small py-2">
+            <i class="bi bi-image me-1"></i>
+            No hay fotos disponibles
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = '';
+      
+      resp.fotos.forEach(function(foto) {
+        var col = document.createElement('div');
+        col.className = 'col-6 col-md-4 col-lg-3 mb-2';
+        
+        var nombre = foto.nombre || 'foto';
+        var ext = nombre.split('.').pop().toLowerCase();
+        var isVideo = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext);
+        
+        if (isVideo) {
+          // ✅ Para videos, mostrar un reproductor
+          col.innerHTML = `
+            <div class="card h-100" style="cursor: pointer;" onclick="window.open('${foto.url}', '_blank')">
+              <video src="${foto.downloadUrl}" class="card-img-top" 
+                     style="height: 120px; object-fit: cover; background: #000;"
+                     muted></video>
+              <div class="card-body p-1 text-center">
+                <small class="text-muted text-truncate d-block" style="font-size: 10px;">🎬 ${nombre.substring(0, 20)}</small>
+              </div>
+            </div>
+          `;
+        } else {
+          // ✅ Para imágenes, usar la miniatura de Google Drive
+          col.innerHTML = `
+            <div class="card h-100" style="cursor: pointer;" onclick="verFotoAmpliada('${foto.downloadUrl}', '${nombre}')">
+              <img src="${foto.thumbnail}" class="card-img-top" alt="${nombre}" 
+                   style="height: 120px; object-fit: cover; background: #f0f0f0;"
+                   onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%22 height=%22100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f0f0f0%22/%3E%3Ctext x=%2250%22 y=%2250%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22 font-size=%2212%22%3E📷%3C/text%3E%3C/svg%3E'">
+              <div class="card-body p-1 text-center">
+                <small class="text-muted text-truncate d-block" style="font-size: 10px;">${nombre.substring(0, 20)}</small>
+              </div>
+            </div>
+          `;
+        }
+        container.appendChild(col);
+      });
+
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al cargar fotos:', err);
+      container.innerHTML = `
+        <div class="col-12 text-center text-muted small py-2">
+          <i class="bi bi-exclamation-triangle me-1"></i>
+          Error al cargar fotos: ${err.message}
+        </div>
+      `;
+    })
+    .obtenerFotosCarpeta(APP.token, folderId);
+}
+/**
+ * Muestra una foto ampliada en un modal o ventana nueva
+ * @param {string} imageUrl - URL de la imagen (puede ser downloadUrl o viewUrl)
+ * @param {string} nombre - Nombre de la imagen
+ */
+function verFotoAmpliada(imageUrl, nombre) {
+  // ✅ Si la URL es de descarga directa, convertir a vista previa
+  var previewUrl = imageUrl;
+  var fileId = imageUrl.match(/[-\w]{25,}/)?.[0];
+  
+  if (fileId) {
+    // Usar la URL de vista previa de Google Drive
+    previewUrl = 'https://drive.google.com/file/d/' + fileId + '/preview';
+  }
+
+  // ✅ Crear un modal simple para ver la foto ampliada
+  var modalHtml = `
+    <div class="modal fade" id="modalFotoAmpliada" tabindex="-1" data-bs-backdrop="static">
+      <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-content" style="background: rgba(0,0,0,0.9);">
+          <div class="modal-header border-0">
+            <h5 class="modal-title text-white">${nombre || 'Foto'}</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body text-center p-0">
+            <!-- ✅ Usar iframe para mostrar la imagen de Google Drive -->
+            <iframe src="${previewUrl}" 
+                    style="width: 100%; height: 80vh; border: none;"
+                    allowfullscreen>
+            </iframe>
+          </div>
+          <div class="modal-footer border-0">
+            <a href="${previewUrl}" target="_blank" class="btn btn-outline-light btn-sm">
+              <i class="bi bi-box-arrow-up-right me-1"></i>Abrir en nueva pestaña
+            </a>
+            <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Eliminar modal existente si hay
+  var existingModal = document.getElementById('modalFotoAmpliada');
+  if (existingModal) existingModal.remove();
+
+  // Insertar modal
+  var div = document.createElement('div');
+  div.innerHTML = modalHtml;
+  document.body.appendChild(div);
+
+  // Mostrar modal
+  var modal = new bootstrap.Modal(document.getElementById('modalFotoAmpliada'));
+  modal.show();
+}
 function auditoriaTiempos(fechaServicio, fechaRegistro) {
   if (!fechaServicio || !fechaRegistro) return '';
   var fs = new Date(fechaServicio);
@@ -1606,11 +1910,53 @@ function guardarCambios(folio) {
     notasRevisor: document.getElementById('edit-notas')?.value,
     tipoRevision: document.getElementById('edit-tipo')?.value || undefined,
   };
+
+  // Mostrar loading
+  mostrarToast('💾 Guardando cambios...', 'info');
+
+  // ✅ Deshabilitar el botón de guardar para evitar doble clic
+  var btnGuardar = document.querySelector('#modal-footer-content .btn-outline-primary');
+  if (btnGuardar) {
+    btnGuardar.disabled = true;
+    btnGuardar.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Guardando...';
+  }
+
   google.script.run
-    .withSuccessHandler(resp => {
-      if (resp.ok) { mostrarToast('Cambios guardados.', 'success');
+    .withSuccessHandler(function(resp) {
+      // ✅ Restaurar botón
+      if (btnGuardar) {
+        btnGuardar.disabled = false;
+        btnGuardar.innerHTML = '<i class="bi bi-floppy me-1"></i>Guardar cambios';
+      }
+
+      if (resp.ok) {
+        mostrarToast('✅ Cambios guardados correctamente.', 'success');
+        
+        // ✅ Cerrar modal
         APP.modal.hide();
-        cargarRegistros(); } else mostrarToast(resp.error, 'error');
+        
+        // ✅ ✅ ✅ FORZAR RECARGA DE REGISTROS (LIMPIANDO CACHÉ)
+        _cacheRegistros = null;  // Limpiar caché
+        _cacheTimestamp = null;  // Limpiar timestamp
+        _registrosPagina = 1;    // Ir a la primera página
+        
+        // ✅ Recargar registros con un pequeño retraso para asegurar que el modal se cierre
+        setTimeout(function() {
+          cargarRegistros(1, true); // Forzar actualización
+        }, 300);
+        
+      } else {
+        mostrarToast('❌ Error: ' + (resp.error || 'No se pudieron guardar los cambios'), 'error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      // ✅ Restaurar botón en caso de error
+      if (btnGuardar) {
+        btnGuardar.disabled = false;
+        btnGuardar.innerHTML = '<i class="bi bi-floppy me-1"></i>Guardar cambios';
+      }
+      console.error('❌ Error en guardarCambios:', err);
+      mostrarToast('❌ Error: ' + err.message, 'error');
     })
     .actualizarRegistro(APP.token, folio, cambios);
 }
@@ -2309,6 +2655,9 @@ function cargarInventario() {
     return;
   }
 
+  cargarDashboardEquipos();
+  cargarDashboardVehiculos();
+
   var filtroEstado = document.getElementById('fil-inv-estado')?.value || '';
   var filtroTipo = document.getElementById('fil-inv-tipo')?.value || '';
   var filtroTipoUnidad = document.getElementById('fil-inv-tipo-unidad')?.value || '';
@@ -2430,7 +2779,286 @@ function cargarInventario() {
     })
     .obtenerInventarioGPS(APP.token);
 }
+/**
+ * Carga el resumen de equipos en el dashboard de inventario
+ */
+function cargarDashboardEquipos() {
+  var container = document.getElementById('dashboard-equipos');
+  if (!container) return;
 
+  container.innerHTML = '<div class="text-muted small">Cargando estadísticas...</div>';
+
+  if (!APP.token) {
+    container.innerHTML = '<div class="text-muted small">Sesión expirada</div>';
+    return;
+  }
+
+  // ✅ Obtener equipos y estados en paralelo
+  var promesaEquipos = new Promise(function(resolve, reject) {
+    google.script.run
+      .withSuccessHandler(function(resp) {
+        if (resp.ok) resolve(resp.equipos || []);
+        else reject(resp.error);
+      })
+      .withFailureHandler(function(err) { reject(err); })
+      .obtenerInventarioGPS(APP.token);
+  });
+
+  var promesaEstados = new Promise(function(resolve, reject) {
+    google.script.run
+      .withSuccessHandler(function(resp) {
+        if (resp.ok) resolve(resp.estados || []);
+        else reject(resp.error);
+      })
+      .withFailureHandler(function(err) { reject(err); })
+      .obtenerEstadosInventario(APP.token);
+  });
+
+  Promise.all([promesaEquipos, promesaEstados])
+    .then(function(resultados) {
+      var equipos = resultados[0];
+      var estados = resultados[1];
+
+      // ✅ Contar equipos por estado (dinámico)
+      var conteoPorEstado = {};
+      estados.forEach(function(e) {
+        conteoPorEstado[e.nombre] = 0;
+      });
+
+      equipos.forEach(function(e) {
+        var estado = e.estado || 'Sin estado';
+        if (conteoPorEstado[estado] !== undefined) {
+          conteoPorEstado[estado]++;
+        } else {
+          // Si un estado no está en la lista, agregarlo
+          conteoPorEstado[estado] = (conteoPorEstado[estado] || 0) + 1;
+        }
+      });
+
+      var total = equipos.length;
+
+      // ✅ Construir HTML dinámicamente
+      var html = `
+        <div class="row g-1">
+          <div class="col-6">
+            <div class="d-flex justify-content-between align-items-center p-1" style="border-bottom:1px solid #e2e8f0;">
+              <span class="text-muted small">📋 Total</span>
+              <span class="fw-bold">${total}</span>
+            </div>
+          </div>
+      `;
+
+      // ✅ Generar tarjetas para cada estado (dinámico)
+      var columnaActual = 0;
+      var maxPorFila = 2; // 2 columnas por fila
+
+      estados.forEach(function(e) {
+        var nombre = e.nombre || 'Sin nombre';
+        var color = e.color || '#6c757d';
+        var count = conteoPorEstado[nombre] || 0;
+        var icono = '';
+        
+        // Asignar icono según el nombre del estado
+        var nombreLower = nombre.toLowerCase();
+        if (nombreLower === 'disponible') icono = '🟢';
+        else if (nombreLower === 'instalado') icono = '🔵';
+        else if (nombreLower === 'garantía' || nombreLower === 'garantia') icono = '🟡';
+        else if (nombreLower === 'siniestrado' || nombreLower === 'baja') icono = '🔴';
+        else icono = '📌';
+
+        // Determinar clase de color para el texto
+        var textColor = 'text-dark';
+        var colorLower = color.toLowerCase();
+        if (colorLower === '#28a745' || colorLower === 'green' || colorLower === 'success') textColor = 'text-success';
+        else if (colorLower === '#007bff' || colorLower === 'blue' || colorLower === 'primary') textColor = 'text-primary';
+        else if (colorLower === '#ffc107' || colorLower === 'yellow' || colorLower === 'warning') textColor = 'text-warning';
+        else if (colorLower === '#dc3545' || colorLower === 'red' || colorLower === 'danger') textColor = 'text-danger';
+        else if (colorLower === '#6c757d' || colorLower === 'gray' || colorLower === 'secondary') textColor = 'text-secondary';
+
+        html += `
+          <div class="col-6">
+            <div class="d-flex justify-content-between align-items-center p-1" style="border-bottom:1px solid #e2e8f0; border-left: 3px solid ${color}; padding-left: 8px;">
+              <span class="text-muted small">${icono} ${nombre}</span>
+              <span class="fw-bold ${textColor}">${count}</span>
+            </div>
+          </div>
+        `;
+      });
+
+      // ✅ Si hay equipos con estados que no están en la lista de estados
+      for (var estadoExtra in conteoPorEstado) {
+        var existe = estados.some(function(e) { return e.nombre === estadoExtra; });
+        if (!existe && conteoPorEstado[estadoExtra] > 0) {
+          html += `
+            <div class="col-6">
+              <div class="d-flex justify-content-between align-items-center p-1" style="border-bottom:1px solid #e2e8f0;">
+                <span class="text-muted small">📌 ${estadoExtra}</span>
+                <span class="fw-bold">${conteoPorEstado[estadoExtra]}</span>
+              </div>
+            </div>
+          `;
+        }
+      }
+
+      html += `</div>`;
+      container.innerHTML = html;
+
+    })
+    .catch(function(err) {
+      console.error('❌ Error en cargarDashboardEquipos:', err);
+      container.innerHTML = '<div class="text-muted small">Error al cargar estadísticas</div>';
+    });
+}
+/**
+ * Carga el resumen de vehículos en el dashboard de inventario
+ */
+function cargarDashboardVehiculos() {
+  var container = document.getElementById('dashboard-vehiculos');
+  if (!container) return;
+
+  container.innerHTML = '<div class="text-muted small">Cargando estadísticas...</div>';
+
+  if (!APP.token) {
+    container.innerHTML = '<div class="text-muted small">Sesión expirada</div>';
+    return;
+  }
+
+  // Obtener equipos para contar vehículos únicos
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok) {
+        container.innerHTML = '<div class="text-muted small">Error al cargar estadísticas</div>';
+        return;
+      }
+
+      var equipos = resp.equipos || [];
+      
+      // Extraer vehículos únicos de los equipos instalados
+      var vehiculosMap = {};
+      equipos.forEach(function(e) {
+        if (e.economico && e.economico.trim() !== '' && e.estado === 'Instalado') {
+          var eco = e.economico.toString().trim();
+          if (!vehiculosMap[eco]) {
+            vehiculosMap[eco] = {
+              economico: eco,
+              equipos: 0
+            };
+          }
+          vehiculosMap[eco].equipos++;
+        }
+      });
+
+      var vehiculos = Object.values(vehiculosMap);
+      var totalVehiculos = vehiculos.length;
+      
+      // Vehículos con más de 1 equipo
+      var multiEquipos = vehiculos.filter(function(v) { return v.equipos > 1; }).length;
+      
+      // Vehículos con solo 1 equipo
+      var unEquipo = vehiculos.filter(function(v) { return v.equipos === 1; }).length;
+
+      var html = `
+        <div class="row g-1">
+          <div class="col-6">
+            <div class="d-flex justify-content-between align-items-center p-1" style="border-bottom:1px solid #e2e8f0;">
+              <span class="text-muted small">🚗 Vehículos con GPS</span>
+              <span class="fw-bold">${totalVehiculos}</span>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="d-flex justify-content-between align-items-center p-1" style="border-bottom:1px solid #e2e8f0;">
+              <span class="text-muted small">📡 Con 1 equipo</span>
+              <span class="fw-bold">${unEquipo}</span>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="d-flex justify-content-between align-items-center p-1" style="border-bottom:1px solid #e2e8f0;">
+              <span class="text-muted small">📡📡 Con múltiples</span>
+              <span class="fw-bold">${multiEquipos}</span>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="d-flex justify-content-between align-items-center p-1">
+              <span class="text-muted small">📦 Equipos instalados</span>
+              <span class="fw-bold">${equipos.filter(function(e) { return e.estado === 'Instalado'; }).length}</span>
+            </div>
+          </div>
+          ${vehiculos.length > 0 ? `
+            <div class="col-12 mt-1">
+              <div class="small text-muted" style="max-height:80px;overflow-y:auto;">
+                ${vehiculos.slice(0, 10).map(function(v) { 
+                  return `<span class="badge bg-secondary me-1">${v.economico} (${v.equipos})</span>`;
+                }).join(' ')}
+                ${vehiculos.length > 10 ? `<span class="badge bg-light text-muted">+${vehiculos.length - 10} más</span>` : ''}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+
+      container.innerHTML = html;
+
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error en cargarDashboardVehiculos:', err);
+      container.innerHTML = '<div class="text-muted small">Error al cargar estadísticas</div>';
+    })
+    .obtenerInventarioGPS(APP.token);
+}
+/**
+ * Actualiza las tarjetas de resumen de estados (superiores)
+ * @param {Array} equipos - Lista de equipos
+ */
+function actualizarResumenEstados(equipos) {
+  // ✅ Primero obtener los estados desde el backend
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok || !resp.estados) {
+        console.warn('⚠️ No se pudieron cargar los estados para el resumen');
+        return;
+      }
+
+      var estados = resp.estados || [];
+      
+      // ✅ Contar equipos por estado
+      var conteoPorEstado = {};
+      estados.forEach(function(e) {
+        conteoPorEstado[e.nombre] = 0;
+      });
+
+      equipos.forEach(function(e) {
+        var estado = e.estado || 'Sin estado';
+        if (conteoPorEstado[estado] !== undefined) {
+          conteoPorEstado[estado]++;
+        }
+      });
+
+      // ✅ Actualizar cada tarjeta
+      estados.forEach(function(e) {
+        var nombre = e.nombre || '';
+        var count = conteoPorEstado[nombre] || 0;
+        
+        // Mapear ID del elemento según el nombre del estado
+        var idMap = {
+          'Disponible': 'inv-disponibles',
+          'Instalado': 'inv-instalados',
+          'Garantía': 'inv-garantia',
+          'Siniestrado': 'inv-baja'
+        };
+        
+        var elementId = idMap[nombre] || null;
+        if (elementId) {
+          var el = document.getElementById(elementId);
+          if (el) el.textContent = count;
+        }
+      });
+
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al actualizar resumen de estados:', err);
+    })
+    .obtenerEstadosInventario(APP.token);
+}
 function limpiarFiltrosInventario() {
   document.getElementById('fil-inv-estado').value = '';
   document.getElementById('fil-inv-tipo').value = '';
@@ -2478,90 +3106,143 @@ function verDetalleInventario(serie) {
 }
 
 function cambiarEstadoInventario(serie, estadoActual, economicoActual) {
-  if (!APP.sesion || APP.sesion.rol > 2) { mostrarToast('⚠️ No tienes permisos para cambiar estados.', 'error'); return; }
+  if (!APP.sesion || APP.sesion.rol > 2) {
+    mostrarToast('⚠️ No tienes permisos para cambiar estados.', 'error');
+    return;
+  }
 
-  var modalHtml = `
-    <div class="modal fade" id="modalCambiarEstado" tabindex="-1">
-      <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title">🔄 Cambiar estado - ${serie}</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-          </div>
-          <div class="modal-body">
-            <div class="mb-3">
-              <label class="form-label">Estado actual</label>
-              <p><span class="badge ${estadoActual === 'Disponible' ? 'bg-success' : estadoActual === 'Instalado' ? 'bg-primary' : estadoActual === 'Garantía' ? 'bg-warning text-dark' : 'bg-danger'}">${estadoActual || 'Desconocido'}</span></p>
+  // ✅ Mostrar loading mientras se cargan los estados
+  mostrarToast('📋 Cargando estados...', 'info');
+
+  // Primero, obtener los estados desde el backend
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok || !resp.estados) {
+        mostrarToast('❌ Error al cargar estados: ' + (resp.error || 'No se encontraron estados'), 'error');
+        return;
+      }
+
+      var estados = resp.estados || [];
+      
+      // Construir el modal con los estados dinámicos
+      var modalHtml = `
+        <div class="modal fade" id="modalCambiarEstado" tabindex="-1">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title">🔄 Cambiar estado - ${serie}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+              </div>
+              <div class="modal-body">
+                <div class="mb-3">
+                  <label class="form-label">Estado actual</label>
+                  <p><span class="badge ${estadoActual === 'Disponible' ? 'bg-success' : estadoActual === 'Instalado' ? 'bg-primary' : estadoActual === 'Garantía' ? 'bg-warning text-dark' : 'bg-danger'}">${estadoActual || 'Desconocido'}</span></p>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Nuevo estado <span class="text-danger">*</span></label>
+                  <select id="nuevo-estado-select" class="form-select">
+                    <option value="">Selecciona un estado...</option>
+      `;
+
+      // ✅ Llenar opciones dinámicamente desde 📋_Estados_Inventario
+      estados.forEach(function(e) {
+        var nombre = e.nombre || '';
+        var color = e.color || '#6c757d';
+        var icono = '';
+        if (nombre === 'Disponible') icono = '🟢';
+        else if (nombre === 'Instalado') icono = '🔵';
+        else if (nombre === 'Garantía') icono = '🟡';
+        else if (nombre === 'Baja') icono = '🔴';
+        else icono = '📌';
+        
+        var selected = (nombre === estadoActual) ? 'selected' : '';
+        modalHtml += `
+          <option value="${nombre}" ${selected} style="border-left: 4px solid ${color}; padding-left: 8px;">
+            ${icono} ${nombre}
+          </option>
+        `;
+      });
+
+      modalHtml += `
+                  </select>
+                </div>
+                <div class="mb-3" id="campo-economico-container" style="display:${estadoActual === 'Instalado' ? 'block' : 'none'};">
+                  <label class="form-label">Económico asignado</label>
+                  <input type="text" id="nuevo-economico-input" class="form-control" placeholder="Ej: G-361" value="${economicoActual || ''}">
+                  <small class="text-muted">Dejar vacío para liberar el equipo</small>
+                </div>
+                <div class="mb-3" id="campo-ticket-container" style="display:none;">
+                  <label class="form-label">Ticket de garantía</label>
+                  <input type="text" id="nuevo-ticket-input" class="form-control" placeholder="Ej: TKT-2026-001">
+                  <small class="text-muted">Número de ticket para seguimiento de garantía</small>
+                </div>
+                <div class="mb-3" id="campo-observaciones-container">
+                  <label class="form-label">Observaciones (opcional)</label>
+                  <textarea id="nuevo-observaciones-input" class="form-control" rows="2" placeholder="Motivo del cambio..."></textarea>
+                </div>
+                <div id="cambio-estado-info" class="alert alert-info small">
+                  <i class="bi bi-info-circle me-1"></i>
+                  <span id="cambio-estado-mensaje">Selecciona un nuevo estado para continuar.</span>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button class="btn btn-primary" onclick="confirmarCambioEstado('${serie}')" id="btn-confirmar-cambio">
+                  <i class="bi bi-check me-1"></i>Confirmar cambio
+                </button>
+              </div>
             </div>
-            <div class="mb-3">
-              <label class="form-label">Nuevo estado <span class="text-danger">*</span></label>
-              <select id="nuevo-estado-select" class="form-select">
-                <option value="">Selecciona un estado...</option>
-                <option value="Disponible" ${estadoActual === 'Disponible' ? 'selected' : ''}>🟢 Disponible</option>
-                <option value="Instalado" ${estadoActual === 'Instalado' ? 'selected' : ''}>🔵 Instalado</option>
-                <option value="Garantía" ${estadoActual === 'Garantía' ? 'selected' : ''}>🟡 Garantía</option>
-                <option value="Baja" ${estadoActual === 'Baja' ? 'selected' : ''}>🔴 Baja</option>
-              </select>
-            </div>
-            <div class="mb-3" id="campo-economico-container" style="display:${estadoActual === 'Instalado' ? 'block' : 'none'};">
-              <label class="form-label">Económico asignado</label>
-              <input type="text" id="nuevo-economico-input" class="form-control" placeholder="Ej: G-361" value="${economicoActual || ''}">
-              <small class="text-muted">Dejar vacío para liberar el equipo</small>
-            </div>
-            <div class="mb-3" id="campo-ticket-container" style="display:none;">
-              <label class="form-label">Ticket de garantía</label>
-              <input type="text" id="nuevo-ticket-input" class="form-control" placeholder="Ej: TKT-2026-001">
-              <small class="text-muted">Número de ticket para seguimiento de garantía</small>
-            </div>
-            <div class="mb-3" id="campo-observaciones-container">
-              <label class="form-label">Observaciones (opcional)</label>
-              <textarea id="nuevo-observaciones-input" class="form-control" rows="2" placeholder="Motivo del cambio..."></textarea>
-            </div>
-            <div id="cambio-estado-info" class="alert alert-info small">
-              <i class="bi bi-info-circle me-1"></i>
-              <span id="cambio-estado-mensaje">Selecciona un nuevo estado para continuar.</span>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-            <button class="btn btn-primary" onclick="confirmarCambioEstado('${serie}')" id="btn-confirmar-cambio">
-              <i class="bi bi-check me-1"></i>Confirmar cambio
-            </button>
           </div>
         </div>
-      </div>
-    </div>
-  `;
+      `;
 
-  var modalExistente = document.getElementById('modalCambiarEstado');
-  if (modalExistente) modalExistente.remove();
+      var modalExistente = document.getElementById('modalCambiarEstado');
+      if (modalExistente) modalExistente.remove();
 
-  var div = document.createElement('div');
-  div.innerHTML = modalHtml;
-  document.body.appendChild(div);
+      var div = document.createElement('div');
+      div.innerHTML = modalHtml;
+      document.body.appendChild(div);
 
-  var modal = new bootstrap.Modal(document.getElementById('modalCambiarEstado'));
-  modal.show();
+      var modal = new bootstrap.Modal(document.getElementById('modalCambiarEstado'));
+      modal.show();
 
-  var selectEstado = document.getElementById('nuevo-estado-select');
-  var campoEconomico = document.getElementById('campo-economico-container');
-  var campoTicket = document.getElementById('campo-ticket-container');
-  var mensajeInfo = document.getElementById('cambio-estado-mensaje');
+      // ✅ Eventos para mostrar/ocultar campos según estado seleccionado
+      var selectEstado = document.getElementById('nuevo-estado-select');
+      var campoEconomico = document.getElementById('campo-economico-container');
+      var campoTicket = document.getElementById('campo-ticket-container');
+      var mensajeInfo = document.getElementById('cambio-estado-mensaje');
 
-  selectEstado.addEventListener('change', function() {
-    var estado = this.value;
-    if (estado === 'Instalado') { campoEconomico.style.display = 'block';
-      campoTicket.style.display = 'none';
-      mensajeInfo.textContent = '📌 Asigna un número económico para instalar el equipo.'; } else if (estado === 'Disponible') { campoEconomico.style.display = 'block';
-      campoTicket.style.display = 'none';
-      mensajeInfo.textContent = '📌 El equipo quedará disponible. El económico se liberará automáticamente.'; } else if (estado === 'Garantía') { campoEconomico.style.display = 'none';
-      campoTicket.style.display = 'block';
-      mensajeInfo.textContent = '📌 Registra el ticket de garantía para dar seguimiento.'; } else if (estado === 'Baja') { campoEconomico.style.display = 'none';
-      campoTicket.style.display = 'none';
-      mensajeInfo.textContent = '⚠️ El equipo quedará marcado como BAJA. Esta acción es irreversible.'; } else { campoEconomico.style.display = 'none';
-      campoTicket.style.display = 'none';
-      mensajeInfo.textContent = 'Selecciona un nuevo estado para continuar.'; }
-  });
+      selectEstado.addEventListener('change', function() {
+        var estado = this.value;
+        if (estado === 'Instalado') {
+          campoEconomico.style.display = 'block';
+          campoTicket.style.display = 'none';
+          mensajeInfo.textContent = '📌 Asigna un número económico para instalar el equipo.';
+        } else if (estado === 'Disponible') {
+          campoEconomico.style.display = 'block';
+          campoTicket.style.display = 'none';
+          mensajeInfo.textContent = '📌 El equipo quedará disponible. El económico se liberará automáticamente.';
+        } else if (estado === 'Garantía') {
+          campoEconomico.style.display = 'none';
+          campoTicket.style.display = 'block';
+          mensajeInfo.textContent = '📌 Registra el ticket de garantía para dar seguimiento.';
+        } else if (estado === 'Baja') {
+          campoEconomico.style.display = 'none';
+          campoTicket.style.display = 'none';
+          mensajeInfo.textContent = '⚠️ El equipo quedará marcado como BAJA. Esta acción es irreversible.';
+        } else {
+          campoEconomico.style.display = 'none';
+          campoTicket.style.display = 'none';
+          mensajeInfo.textContent = 'Selecciona un nuevo estado para continuar.';
+        }
+      });
+
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al cargar estados:', err);
+      mostrarToast('❌ Error al cargar estados: ' + err.message, 'error');
+    })
+    .obtenerEstadosInventario(APP.token);
 }
 
 function confirmarCambioEstado(serie) {
@@ -2603,17 +3284,25 @@ function confirmarCambioEstado(serie) {
 }
 
 function editarEquipoInventario(serie) {
-  if (!serie) { mostrarToast('⚠️ No se especificó un equipo.', 'error'); return; }
-  if (!APP.sesion || APP.sesion.rol > 2) { mostrarToast('⚠️ No tienes permisos para editar equipos.', 'error'); return; }
+  if (!serie) {
+    mostrarToast('⚠️ No se especificó un equipo.', 'error');
+    return;
+  }
+  if (!APP.sesion || APP.sesion.rol > 2) {
+    mostrarToast('⚠️ No tienes permisos para editar equipos.', 'error');
+    return;
+  }
 
   mostrarToast('📋 Cargando datos del equipo ' + serie + '...', 'info');
 
   google.script.run
     .withSuccessHandler(function(resp) {
-      if (!resp.ok || !resp.equipo) { mostrarToast('❌ ' + (resp.error || 'No se encontró el equipo'), 'error'); return; }
+      if (!resp.ok || !resp.equipo) {
+        mostrarToast('❌ ' + (resp.error || 'No se encontró el equipo'), 'error');
+        return;
+      }
 
       var e = resp.equipo;
-      var estados = ['Disponible', 'Instalado', 'Garantía', 'Baja'];
 
       var modalHtml = `
         <div class="modal fade" id="modalEditarEquipo" tabindex="-1">
@@ -2624,39 +3313,60 @@ function editarEquipoInventario(serie) {
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
               </div>
               <div class="modal-body">
-                <div class="alert alert-info small"><i class="bi bi-info-circle me-1"></i>Los campos marcados con <span class="text-danger">*</span> son obligatorios.</div>
+                <div class="alert alert-info small">
+                  <i class="bi bi-info-circle me-1"></i>Los campos marcados con <span class="text-danger">*</span> son obligatorios.
+                </div>
                 <div class="row g-3">
-                  <div class="col-12"><label class="form-label small text-muted">Serie (no editable)</label><p><code style="font-size:16px;">${e.serie}</code></p></div>
+                  <div class="col-12">
+                    <label class="form-label small text-muted">Serie (no editable)</label>
+                    <p><code style="font-size:16px;">${e.serie}</code></p>
+                  </div>
+
+                  <!-- Tipo (dinámico desde 📋_Tipos_Equipo) -->
                   <div class="col-md-4">
-                    <label class="form-label">Tipo <span class="text-danger">*</span></label>
-                    <select id="edit-tipo-equipo" class="form-select">
-                      <option value="VG54" ${e.tipo === 'VG54' ? 'selected' : ''}>VG54 - Gateway</option>
-                      <option value="VG55" ${e.tipo === 'VG55' ? 'selected' : ''}>VG55 - Gateway</option>
-                      <option value="CM32" ${e.tipo === 'CM32' ? 'selected' : ''}>CM32 - Cámara</option>
-                      <option value="CM34" ${e.tipo === 'CM34' ? 'selected' : ''}>CM34 - Cámara</option>
+                    <label class="form-label required">Tipo <span class="text-danger">*</span></label>
+                    <select id="edit-tipo-equipo" class="form-select" required>
+                      <option value="">Cargando tipos...</option>
                     </select>
                   </div>
+
+                  <!-- Modelo (se autocompleta) -->
                   <div class="col-md-4">
-                    <label class="form-label">Modelo <span class="text-danger">*</span></label>
-                    <input type="text" id="edit-modelo-equipo" class="form-control" value="${e.modelo || ''}" placeholder="Samsara CM32">
+                    <label class="form-label">Modelo</label>
+                    <input type="text" id="edit-modelo-equipo" class="form-control" 
+                           value="${e.modelo || ''}" placeholder="Se autocompleta según el tipo">
                   </div>
+
+                  <!-- IMEI -->
                   <div class="col-md-4">
                     <label class="form-label">IMEI</label>
-                    <input type="text" id="edit-imei-equipo" class="form-control" value="${e.imei || ''}" placeholder="123456789012345">
+                    <input type="text" id="edit-imei-equipo" class="form-control" 
+                           value="${e.imei || ''}" placeholder="123456789012345">
                   </div>
+
+                  <!-- Estado (dinámico desde 📋_Estados_Inventario) -->
                   <div class="col-md-4">
-                    <label class="form-label">Estado <span class="text-danger">*</span></label>
-                    <select id="edit-estado-equipo" class="form-select">
-                      ${estados.map(function(est) { return `<option value="${est}" ${e.estado === est ? 'selected' : ''}>${est}</option>`; }).join('')}
+                    <label class="form-label required">Estado <span class="text-danger">*</span></label>
+                    <select id="edit-estado-equipo" class="form-select" required>
+                      <option value="">Cargando estados...</option>
                     </select>
                   </div>
+
+                  <!-- Económico (select desde flotilla) -->
                   <div class="col-md-4">
                     <label class="form-label">Económico asignado</label>
-                    <input type="text" id="edit-economico-equipo" class="form-control" value="${e.economico || ''}" placeholder="Ej: G-361">
+                    <select id="edit-economico-equipo" class="form-select">
+                      <option value="">Selecciona un vehículo...</option>
+                    </select>
                   </div>
+
+                  <!-- Fecha instalación -->
                   <div class="col-md-4">
-                    <label class="form-label small text-muted">Fecha instalación</label><p>${e.fechaInstalacion || '—'}</p>
+                    <label class="form-label small text-muted">Fecha instalación</label>
+                    <p>${e.fechaInstalacion || '—'}</p>
                   </div>
+
+                  <!-- Observaciones -->
                   <div class="col-12">
                     <label class="form-label">Observaciones</label>
                     <textarea id="edit-observaciones-equipo" class="form-control" rows="3">${e.observaciones || ''}</textarea>
@@ -2681,15 +3391,94 @@ function editarEquipoInventario(serie) {
       div.innerHTML = modalHtml;
       document.body.appendChild(div);
 
+      // ✅ Cargar tipos dinámicamente
+      cargarTiposEquipoEnSelect('edit-tipo-equipo', e.tipo || '');
+
+      // ✅ Evento: autocompletar modelo al cambiar tipo
+      document.getElementById('edit-tipo-equipo').addEventListener('change', function() {
+        var tipo = this.value;
+        var modeloInput = document.getElementById('edit-modelo-equipo');
+        if (tipo) {
+          autocompletarModeloPorTipoEnInput(tipo, modeloInput);
+        } else {
+          modeloInput.value = '';
+          modeloInput.placeholder = 'Se autocompleta según el tipo';
+        }
+      });
+
+      // ✅ Cargar estados dinámicamente
+      cargarEstadosInventarioEnSelect('edit-estado-equipo', e.estado || '');
+
+      // ✅ Cargar vehículos y seleccionar el actual
+      cargarVehiculosEnSelect('edit-economico-equipo', e.economico || '');
+
+      // ✅ Evento: cuando cambia el estado, mostrar/ocultar económico
+      document.getElementById('edit-estado-equipo').addEventListener('change', function() {
+        var estado = this.value;
+        var economicoSelect = document.getElementById('edit-economico-equipo');
+        if (estado === 'Instalado') {
+          economicoSelect.style.display = 'block';
+          economicoSelect.required = true;
+        } else {
+          economicoSelect.style.display = 'block';
+          economicoSelect.required = false;
+        }
+      });
+
       var modal = new bootstrap.Modal(document.getElementById('modalEditarEquipo'));
       modal.show();
-    })
-    .withFailureHandler(function(err) { mostrarToast('❌ Error: ' + err.message, 'error'); })
-    .obtenerEquipoInventario(APP.token, serie);
-      // ✅ Cargar estados de inventario en el select de edición
-  cargarEstadosInventarioEnSelect('edit-estado-equipo', e.estado || '');
-}
 
+    })
+    .withFailureHandler(function(err) {
+      mostrarToast('❌ Error: ' + err.message, 'error');
+    })
+    .obtenerEquipoInventario(APP.token, serie);
+}
+/**
+ * Autocompleta el modelo en un input específico según el tipo seleccionado
+ * @param {string} tipoClave - Clave del tipo (ej: VG54, CM32)
+ * @param {HTMLElement} modeloInput - Elemento input donde poner el modelo
+ */
+function autocompletarModeloPorTipoEnInput(tipoClave, modeloInput) {
+  if (!modeloInput) return;
+
+  if (!tipoClave) {
+    modeloInput.value = '';
+    modeloInput.placeholder = 'Se autocompleta según el tipo';
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok || !resp.tipos) {
+        modeloInput.value = '';
+        modeloInput.placeholder = 'Modelo no encontrado';
+        return;
+      }
+
+      var tipos = resp.tipos || [];
+      var encontrado = false;
+
+      tipos.forEach(function(t) {
+        if (t.clave === tipoClave) {
+          modeloInput.value = t.nombre;
+          modeloInput.placeholder = '';
+          encontrado = true;
+        }
+      });
+
+      if (!encontrado) {
+        modeloInput.value = '';
+        modeloInput.placeholder = 'Modelo no encontrado';
+      }
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error:', err);
+      modeloInput.value = '';
+      modeloInput.placeholder = 'Error al cargar modelo';
+    })
+    .obtenerTiposEquipo(APP.token, null);
+}
 function guardarEdicionEquipo(serie) {
   var tipo = document.getElementById('edit-tipo-equipo').value;
   var modelo = document.getElementById('edit-modelo-equipo').value.trim();
@@ -2698,24 +3487,64 @@ function guardarEdicionEquipo(serie) {
   var economico = document.getElementById('edit-economico-equipo').value.trim();
   var observaciones = document.getElementById('edit-observaciones-equipo').value.trim();
 
-  if (!tipo || !modelo || !estado) { mostrarToast('⚠️ Todos los campos obligatorios deben estar llenos.', 'error'); return; }
+  if (!tipo || !estado) {
+    mostrarToast('⚠️ Tipo y estado son obligatorios.', 'error');
+    return;
+  }
 
-  var mensaje = '¿Confirmas los cambios para el equipo ' + serie + '?\n\n📌 Tipo: ' + tipo + '\n📌 Modelo: ' + modelo + '\n📌 IMEI: ' + (imei || '—') + '\n📌 Estado: ' + estado + '\n📌 Económico: ' + (economico || '—');
+  // ✅ Si estado es Instalado, verificar económico
+  if (estado === 'Instalado' && !economico) {
+    mostrarToast('⚠️ Para instalar el equipo, debes asignar un número económico.', 'error');
+    document.getElementById('edit-economico-equipo').focus();
+    return;
+  }
+
+  var mensaje = '¿Confirmas los cambios para el equipo ' + serie + '?\n\n' +
+                '📌 Tipo: ' + tipo + '\n' +
+                '📌 Modelo: ' + modelo + '\n' +
+                '📌 IMEI: ' + (imei || '—') + '\n' +
+                '📌 Estado: ' + estado + '\n' +
+                '📌 Económico: ' + (economico || '—');
   if (!confirm(mensaje)) return;
 
   mostrarToast('💾 Guardando cambios...', 'info');
 
+  var btnGuardar = document.querySelector('#modalEditarEquipo .btn-primary');
+  if (btnGuardar) {
+    btnGuardar.disabled = true;
+    btnGuardar.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Guardando...';
+  }
+
   google.script.run
     .withSuccessHandler(function(resp) {
+      if (btnGuardar) {
+        btnGuardar.disabled = false;
+        btnGuardar.innerHTML = '<i class="bi bi-save me-1"></i>Guardar cambios';
+      }
       if (resp.ok) {
         mostrarToast('✅ Equipo actualizado correctamente', 'success');
         var modal = bootstrap.Modal.getInstance(document.getElementById('modalEditarEquipo'));
         if (modal) modal.hide();
         cargarInventario();
-      } else mostrarToast('❌ Error: ' + resp.error, 'error');
+      } else {
+        mostrarToast('❌ Error: ' + resp.error, 'error');
+      }
     })
-    .withFailureHandler(function(err) { mostrarToast('❌ Error: ' + err.message, 'error'); })
-    .actualizarEquipoInventario(APP.token, serie, { tipo, modelo, imei, estado, economico, observaciones });
+    .withFailureHandler(function(err) {
+      if (btnGuardar) {
+        btnGuardar.disabled = false;
+        btnGuardar.innerHTML = '<i class="bi bi-save me-1"></i>Guardar cambios';
+      }
+      mostrarToast('❌ Error: ' + err.message, 'error');
+    })
+    .actualizarEquipoInventario(APP.token, serie, {
+      tipo: tipo,
+      modelo: modelo,
+      imei: imei,
+      estado: estado,
+      economico: economico,
+      observaciones: observaciones
+    });
 }
 
 function mostrarFormAgregarEquipo() {
@@ -2851,7 +3680,187 @@ function mostrarFormAgregarEquipo() {
   // Mostrar modal
   new bootstrap.Modal(document.getElementById('modalAgregarEquipo')).show();
 }
+/**
+ * Carga los tipos de equipo en un select desde 📋_Tipos_Equipo
+ */
+function cargarTiposEquipoEnSelect(selectId, valorSeleccionado) {
+  var select = document.getElementById(selectId);
+  if (!select) return;
 
+  while (select.options.length > 0) select.remove(0);
+
+  var defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = 'Selecciona un tipo...';
+  select.appendChild(defaultOption);
+
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok) {
+        var option = document.createElement('option');
+        option.value = '';
+        option.textContent = '❌ Error al cargar tipos';
+        select.appendChild(option);
+        return;
+      }
+
+      var tipos = resp.tipos || [];
+      var tiposFiltrados = tipos.filter(function(t) {
+        var clave = t.clave.toUpperCase();
+        return clave.indexOf('ARNES') === -1 &&
+               clave.indexOf('BTN') === -1 &&
+               clave.indexOf('EI') === -1;
+      });
+
+      tiposFiltrados.forEach(function(t) {
+        var option = document.createElement('option');
+        option.value = t.clave;
+        option.textContent = t.nombre + ' (' + (t.descripcion || '') + ')';
+        if (t.clave === valorSeleccionado) option.selected = true;
+        select.appendChild(option);
+      });
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error:', err);
+      var option = document.createElement('option');
+      option.value = '';
+      option.textContent = '❌ Error de conexión';
+      select.appendChild(option);
+    })
+    .obtenerTiposEquipo(APP.token, null);
+}
+/**
+ * Autocompleta el modelo según el tipo seleccionado
+ */
+function autocompletarModeloPorTipo(tipoClave) {
+  var modeloInput = document.getElementById('new-modelo');
+  if (!modeloInput) return;
+
+  if (!tipoClave) {
+    modeloInput.value = '';
+    modeloInput.placeholder = 'Se autocompletará según el tipo seleccionado';
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok || !resp.tipos) {
+        modeloInput.value = '';
+        modeloInput.placeholder = 'Modelo no encontrado';
+        return;
+      }
+
+      var tipos = resp.tipos || [];
+      var encontrado = false;
+
+      tipos.forEach(function(t) {
+        if (t.clave === tipoClave) {
+          modeloInput.value = t.nombre;
+          modeloInput.placeholder = '';
+          encontrado = true;
+        }
+      });
+
+      if (!encontrado) {
+        modeloInput.value = '';
+        modeloInput.placeholder = 'Modelo no encontrado';
+      }
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error:', err);
+      modeloInput.value = '';
+      modeloInput.placeholder = 'Error al cargar modelo';
+    })
+    .obtenerTiposEquipo(APP.token, null);
+}
+/**
+ * Carga los estados de inventario en un select
+ */
+function cargarEstadosInventarioEnSelect(selectId, valorSeleccionado) {
+  var select = document.getElementById(selectId);
+  if (!select) return;
+
+  while (select.options.length > 0) select.remove(0);
+
+  var defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = 'Selecciona un estado...';
+  select.appendChild(defaultOption);
+
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok) {
+        var option = document.createElement('option');
+        option.value = '';
+        option.textContent = '❌ Error al cargar estados';
+        select.appendChild(option);
+        return;
+      }
+
+      var estados = resp.estados || [];
+      estados.forEach(function(e) {
+        var option = document.createElement('option');
+        option.value = e.nombre;
+        option.textContent = e.nombre;
+        if (e.color) {
+          option.style.borderLeft = '4px solid ' + e.color;
+          option.style.paddingLeft = '8px';
+        }
+        if (e.nombre === valorSeleccionado) option.selected = true;
+        select.appendChild(option);
+      });
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error:', err);
+      var option = document.createElement('option');
+      option.value = '';
+      option.textContent = '❌ Error de conexión';
+      select.appendChild(option);
+    })
+    .obtenerEstadosInventario(APP.token);
+}
+/**
+ * Carga los vehículos de la flotilla en un select
+ */
+function cargarVehiculosEnSelect(selectId, valorSeleccionado) {
+  var select = document.getElementById(selectId);
+  if (!select) return;
+
+  while (select.options.length > 0) select.remove(0);
+
+  var defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = 'Selecciona un vehículo...';
+  select.appendChild(defaultOption);
+
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok) {
+        var option = document.createElement('option');
+        option.value = '';
+        option.textContent = '❌ Error al cargar vehículos';
+        select.appendChild(option);
+        return;
+      }
+
+      var vehiculos = resp.vehiculos || [];
+      vehiculos.forEach(function(v) {
+        var option = document.createElement('option');
+        option.value = v.economico;
+        option.textContent = v.economico + ' - ' + (v.placas || 'Sin placas');
+        if (v.economico === valorSeleccionado) option.selected = true;
+        select.appendChild(option);
+      });
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error:', err);
+      var option = document.createElement('option');
+      option.value = '';
+      option.textContent = '❌ Error de conexión';
+      select.appendChild(option);
+    })
+    .obtenerVehiculosFlotilla(APP.token);
+}
 /**
  * Carga los vehículos de la flotilla en un select
  * @param {string} selectId - ID del select
@@ -3087,12 +4096,15 @@ function guardarNuevoEquipo() {
     return;
   }
 
-  // ✅ Verificar que la serie no exista ya
+  // ✅ Verificar que la serie no exista ya (CON BACKUP EN CASO DE ERROR)
   mostrarToast('🔍 Verificando serie...', 'info');
 
   google.script.run
     .withSuccessHandler(function(verificacion) {
-      if (verificacion.existe) {
+      console.log('✅ Verificación de serie:', verificacion);
+      
+      // Si la verificación falla, continuar de todas formas (el backend validará)
+      if (verificacion && verificacion.existe) {
         mostrarToast('⚠️ La serie ' + serie + ' ya está registrada en el inventario.', 'error');
         document.getElementById('new-serie').focus();
         document.getElementById('new-serie').select();
@@ -3104,7 +4116,7 @@ function guardarNuevoEquipo() {
 
     })
     .withFailureHandler(function(err) {
-      console.error('❌ Error al verificar serie:', err);
+      console.warn('⚠️ Error al verificar serie (continuando de todas formas):', err);
       // Continuar igual, el backend validará
       continuarGuardarEquipo();
     })
@@ -3120,19 +4132,36 @@ function guardarNuevoEquipo() {
       btnGuardar.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Guardando...';
     }
 
+    // ✅ Preparar datos para enviar (igual que antes)
+    var datosEquipo = {
+      serie: serie.toUpperCase(),
+      tipo: tipo,
+      modelo: modelo,
+      imei: imei,
+      estado: estado,
+      economico: economico,
+      observaciones: observaciones,
+      tipoUnidad: ''
+    };
+
+    console.log('📌 Enviando equipo al backend:', JSON.stringify(datosEquipo));
+
     google.script.run
       .withSuccessHandler(function(resp) {
         if (btnGuardar) {
           btnGuardar.disabled = false;
           btnGuardar.innerHTML = '<i class="bi bi-save me-1"></i>Guardar equipo';
         }
+        
+        console.log('✅ Respuesta del backend:', resp);
+        
         if (resp.ok) {
           mostrarToast('✅ Equipo agregado correctamente', 'success');
           var modal = bootstrap.Modal.getInstance(document.getElementById('modalAgregarEquipo'));
           if (modal) modal.hide();
           cargarInventario();
         } else {
-          mostrarToast('❌ Error: ' + resp.error, 'error');
+          mostrarToast('❌ Error: ' + (resp.error || 'Error desconocido'), 'error');
         }
       })
       .withFailureHandler(function(err) {
@@ -3140,17 +4169,10 @@ function guardarNuevoEquipo() {
           btnGuardar.disabled = false;
           btnGuardar.innerHTML = '<i class="bi bi-save me-1"></i>Guardar equipo';
         }
-        mostrarToast('❌ Error: ' + err.message, 'error');
+        console.error('❌ Error en la llamada al backend:', err);
+        mostrarToast('❌ Error de conexión: ' + err.message, 'error');
       })
-      .agregarEquipoInventario(APP.token, {
-        serie: serie.toUpperCase(),
-        tipo: tipo,
-        modelo: modelo,
-        imei: imei,
-        estado: estado,
-        economico: economico,
-        observaciones: observaciones
-      });
+      .agregarEquipoInventario(APP.token, datosEquipo);
   }
 }
 
@@ -3223,26 +4245,6 @@ function cargarTiposUnidadEnSelect(selectId, valorSeleccionado) {
     });
   }).catch(function(err) { console.error('Error al cargar tipos de unidad:', err);
     mostrarToast('⚠️ Error al cargar tipos de unidad', 'error'); });
-}
-
-function cargarTiposUnidadEnFiltro() {
-  var select = document.getElementById('fil-inv-tipo-unidad');
-  if (!select) return;
-  var valorActual = select.value;
-  while (select.options.length > 0) select.remove(0);
-  var defaultOption = document.createElement('option');
-  defaultOption.value = '';
-  defaultOption.textContent = 'Todos';
-  select.appendChild(defaultOption);
-  obtenerTiposUnidad(false).then(function(tipos) {
-    tipos.forEach(function(tipo) {
-      var option = document.createElement('option');
-      option.value = tipo;
-      option.textContent = tipo;
-      select.appendChild(option);
-    });
-    if (valorActual) select.value = valorActual;
-  }).catch(function(err) { console.error('Error al cargar tipos en filtro:', err); });
 }
 
 function cargarTiposUnidadEnFiltroFlotilla() {
@@ -4734,11 +5736,33 @@ function mostrarToast(msg, tipo) {
 }
 
 function badgeClase(estado) {
-  return {
-    'Borrador': 'badge-borrador',
-    'Listo para pago': 'badge-revision',
-    'Pagado': 'badge-pagado',
-  }[estado] || 'bg-secondary';
+  if (!estado) return 'bg-secondary text-white';
+  
+  var estadoUpper = estado.toString().toUpperCase().trim();
+  
+  var clases = {
+    'BORRADOR': 'badge bg-warning text-dark',
+    'LISTO PARA PAGO': 'badge bg-info text-white',
+    'APROBADO': 'badge bg-success text-white',
+    'PAGADO': 'badge bg-success text-white',
+    'CANCELADO': 'badge bg-danger text-white',
+    'RECHAZADO': 'badge bg-danger text-white',
+    'EN REVISIÓN': 'badge bg-primary text-white',
+    'EN REVISION': 'badge bg-primary text-white'
+  };
+  
+  if (clases[estadoUpper]) {
+    return clases[estadoUpper];
+  }
+  
+  // Buscar coincidencia parcial
+  if (estadoUpper.indexOf('BORRADOR') !== -1) return 'badge bg-warning text-dark';
+  if (estadoUpper.indexOf('LISTO') !== -1 || estadoUpper.indexOf('PAGO') !== -1) return 'badge bg-info text-white';
+  if (estadoUpper.indexOf('APROBADO') !== -1) return 'badge bg-success text-white';
+  if (estadoUpper.indexOf('PAGADO') !== -1) return 'badge bg-success text-white';
+  
+  // Por defecto, gris con texto blanco
+  return 'badge bg-secondary text-white';
 }
 
 function formatFecha(val) {
@@ -9129,7 +10153,14 @@ function cargarRegistros(pagina, forzarActualizacion) {
   pagina = pagina || _registrosPagina;
   console.log('🔄 cargarRegistros - INICIO (Página:', pagina, ')');
 
-  // ✅ VERIFICAR CACHÉ (solo si no se fuerza actualización)
+  // ✅ Si se fuerza actualización, limpiar caché
+  if (forzarActualizacion) {
+    _cacheRegistros = null;
+    _cacheTimestamp = null;
+    console.log('🧹 Caché limpiada por actualización forzada');
+  }
+
+  // ✅ Verificar caché (solo si no se fuerza actualización)
   if (!forzarActualizacion && _cacheRegistros && _cacheTimestamp) {
     var ahora = Date.now();
     if (ahora - _cacheTimestamp < _cacheTTL) {
@@ -9183,7 +10214,7 @@ function cargarRegistros(pagina, forzarActualizacion) {
       _registrosPagina = resp.pagina || pagina;
       _registrosTotalPaginas = resp.totalPaginas || 0;
 
-      // ✅ GUARDAR EN CACHÉ
+      // ✅ Guardar en caché
       _cacheRegistros = registros;
       _cacheTimestamp = Date.now();
 
@@ -9784,23 +10815,29 @@ function cargarEstadosVehiculoEnFiltro(selectId) {
     })
     .obtenerEstadosVehiculo(APP.token);
 }
+/**
+ * Carga los tipos de unidad en el filtro de inventario
+ * @param {string} selectId - ID del select (opcional, por defecto 'fil-inv-tipo-unidad')
+ */
 function cargarTiposUnidadEnFiltro(selectId) {
   console.log('🔄 cargarTiposUnidadEnFiltro - INICIO');
   
-  var select = document.getElementById(selectId);
+  // Usar el ID por defecto si no se proporciona
+  var idSelect = selectId || 'fil-inv-tipo-unidad';
+  var select = document.getElementById(idSelect);
   if (!select) {
-    console.warn('⚠️ Select no encontrado:', selectId);
+    console.warn('⚠️ Select no encontrado:', idSelect);
     return;
   }
 
-  console.log('✅ Select encontrado:', selectId, 'opciones actuales:', select.options.length);
+  console.log('✅ Select encontrado:', idSelect, 'opciones actuales:', select.options.length);
 
   if (!APP.token) {
     console.warn('⚠️ APP.token no disponible');
     return;
   }
 
-  // Guardar valor seleccionado
+  // Guardar valor seleccionado actual
   var valorActual = select.value;
 
   google.script.run
@@ -9837,7 +10874,7 @@ function cargarTiposUnidadEnFiltro(selectId) {
       console.log('✅ Tipos cargados:', select.options.length - 1, 'opciones');
     })
     .withFailureHandler(function(err) {
-      console.error('❌ Error:', err);
+      console.error('❌ Error al cargar tipos de unidad:', err);
     })
     .obtenerTiposUnidad(APP.token);
 }
@@ -10514,6 +11551,313 @@ function validarYAutocompletarTipo(serie, tipoEquipo) {
       }
     })
     .validarSerieGPSInventario(APP.token, serieLimpia, tipoEquipo);
+}
+/**
+ * Abre el modal de administración de accesorios
+ */
+function abrirAdminAccesorios() {
+  if (!APP.sesion || APP.sesion.rol > 2) {
+    mostrarToast('⚠️ Solo Administradores y Revisores pueden gestionar accesorios.', 'error');
+    return;
+  }
+
+  // Crear el modal si no existe
+  var modalExistente = document.getElementById('modalAdminAccesorios');
+  if (!modalExistente) {
+    // El modal ya debe estar en el HTML (Index.html)
+    // Si no existe, mostrar mensaje
+    mostrarToast('⚠️ El modal de accesorios no está disponible.', 'error');
+    return;
+  }
+
+  cargarListaAccesorios();
+  var modal = new bootstrap.Modal(document.getElementById('modalAdminAccesorios'));
+  modal.show();
+}
+/**
+ * Carga la lista de accesorios
+ */
+function cargarListaAccesorios() {
+  var container = document.getElementById('accesorios-list-container');
+  if (!container) {
+    console.warn('⚠️ Contenedor de accesorios no encontrado');
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="text-center text-muted py-4">
+      <div class="spinner-border spinner-border-sm me-2"></div>
+      Cargando accesorios...
+    </div>
+  `;
+
+  if (!APP.token) {
+    container.innerHTML = `<div class="alert alert-danger small">⚠️ Sesión expirada. Recarga la página.</div>`;
+    return;
+  }
+
+  console.log('🔄 Llamando a obtenerAccesoriosStock...');
+
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      console.log('✅ Respuesta recibida:', resp);
+      
+      if (!resp) {
+        container.innerHTML = `<div class="alert alert-danger small">❌ Error: No se recibió respuesta del servidor.</div>`;
+        return;
+      }
+
+      if (!resp.ok) {
+        container.innerHTML = `<div class="alert alert-danger small">❌ Error: ${resp.error || 'Error desconocido'}</div>`;
+        return;
+      }
+
+      var accesorios = resp.accesorios || [];
+      
+      if (accesorios.length === 0) {
+        container.innerHTML = `
+          <div class="text-center text-muted py-4">
+            <i class="bi bi-inbox" style="font-size: 24px; display: block; margin-bottom: 8px;"></i>
+            No hay accesorios registrados.
+          </div>
+        `;
+        return;
+      }
+
+      var html = `
+        <div class="table-responsive">
+          <table class="table table-hover table-sm" style="font-size: 13px;">
+            <thead class="table-light">
+              <tr>
+                <th>Nombre</th>
+                <th>Tipo</th>
+                <th>Stock</th>
+                <th>Asignados</th>
+                <th>Disponibles</th>
+                <th>Asignado a</th>
+                <th style="text-align:center;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
+
+      accesorios.forEach(function(a) {
+        html += `
+          <tr>
+            <td><strong>${a.nombre || '—'}</strong></td>
+            <td>${a.tipo || '—'}</td>
+            <td>${a.stockTotal || 0}</td>
+            <td>${a.asignados || 0}</td>
+            <td>${a.disponibles || 0}</td>
+            <td><code style="font-size:11px;">${a.economicoAsignado || '—'}</code></td>
+            <td style="text-align:center; white-space:nowrap;">
+              <button class="btn btn-sm btn-outline-primary" onclick="editarAccesorio('${a.id}')" title="Editar">
+                <i class="bi bi-pencil"></i>
+              </button>
+              <button class="btn btn-sm btn-outline-danger" onclick="eliminarAccesorio('${a.id}')" title="Eliminar">
+                <i class="bi bi-trash"></i>
+              </button>
+            </td>
+          </tr>
+        `;
+      });
+
+      html += `
+            </tbody>
+          </table>
+        </div>
+        <div class="text-muted small mt-2">
+          Total: ${accesorios.length} accesorios registrados
+        </div>
+      `;
+
+      container.innerHTML = html;
+
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al cargar accesorios:', err);
+      container.innerHTML = `<div class="alert alert-danger small">❌ Error de conexión: ${err.message || 'Error desconocido'}</div>`;
+    })
+    .obtenerAccesoriosStock(APP.token);
+}
+/**
+ * Muestra el formulario para nuevo accesorio
+ */
+function mostrarFormNuevoAccesorio() {
+  var container = document.getElementById('accesorio-form-container');
+  if (!container) return;
+
+  document.getElementById('accesorio-form-nombre').value = '';
+  document.getElementById('accesorio-form-tipo').value = '';
+  document.getElementById('accesorio-form-stock').value = 50;
+  document.getElementById('accesorio-form-asignados').value = 0;
+  document.getElementById('accesorio-form-descripcion').value = '';
+  document.getElementById('accesorio-form-editando').value = 'false';
+  document.getElementById('accesorio-form-id').value = '';
+  document.getElementById('accesorio-form-titulo').innerHTML = '<i class="bi bi-plus-circle me-1"></i>Nuevo accesorio';
+
+  container.style.display = 'block';
+  document.getElementById('accesorio-form-nombre').focus();
+}
+/**
+ * Cierra el formulario de accesorio
+ */
+function cerrarFormAccesorio() {
+  var container = document.getElementById('accesorio-form-container');
+  if (container) {
+    container.style.display = 'none';
+  }
+}
+/**
+ * Guarda un accesorio (nuevo o editado)
+ */
+function guardarAccesorioForm() {
+  var nombre = document.getElementById('accesorio-form-nombre').value.trim();
+  var tipo = document.getElementById('accesorio-form-tipo').value.trim();
+  var stockTotal = parseInt(document.getElementById('accesorio-form-stock').value) || 0;
+  var asignados = parseInt(document.getElementById('accesorio-form-asignados').value) || 0;
+  var descripcion = document.getElementById('accesorio-form-descripcion').value.trim();
+  var editando = document.getElementById('accesorio-form-editando').value === 'true';
+  var id = document.getElementById('accesorio-form-id').value;
+
+  if (!nombre) {
+    mostrarToast('⚠️ El nombre del accesorio es requerido.', 'error');
+    document.getElementById('accesorio-form-nombre').focus();
+    return;
+  }
+
+  if (!tipo) {
+    mostrarToast('⚠️ El tipo del accesorio es requerido.', 'error');
+    document.getElementById('accesorio-form-tipo').focus();
+    return;
+  }
+
+  if (stockTotal < 0) {
+    mostrarToast('⚠️ El stock total no puede ser negativo.', 'error');
+    return;
+  }
+
+  var btnGuardar = document.querySelector('#accesorio-form-container .btn-primary');
+  if (btnGuardar) {
+    btnGuardar.disabled = true;
+    btnGuardar.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Guardando...';
+  }
+
+  var datos = {
+    nombre: nombre,
+    tipo: tipo,
+    stockTotal: stockTotal,
+    asignados: asignados,
+    descripcion: descripcion
+  };
+
+  var funcionBackend = editando ? 'actualizarAccesorioStock' : 'agregarAccesorioStock';
+  var parametros = editando ? [APP.token, id, datos] : [APP.token, datos];
+
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (btnGuardar) {
+        btnGuardar.disabled = false;
+        btnGuardar.innerHTML = '<i class="bi bi-check me-1"></i>Guardar';
+      }
+      if (resp.ok) {
+        mostrarToast('✅ ' + resp.mensaje, 'success');
+        cerrarFormAccesorio();
+        cargarListaAccesorios();
+      } else {
+        mostrarToast('❌ ' + resp.error, 'error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      if (btnGuardar) {
+        btnGuardar.disabled = false;
+        btnGuardar.innerHTML = '<i class="bi bi-check me-1"></i>Guardar';
+      }
+      mostrarToast('❌ Error: ' + err.message, 'error');
+    })
+    [funcionBackend].apply(this, parametros);
+}
+/**
+ * Edita un accesorio existente
+ */
+function editarAccesorio(id) {
+  if (!id) {
+    mostrarToast('⚠️ No se especificó el accesorio.', 'error');
+    return;
+  }
+
+  mostrarToast('📋 Cargando datos del accesorio...', 'info');
+
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (!resp.ok) {
+        mostrarToast('❌ ' + resp.error, 'error');
+        return;
+      }
+
+      var accesorios = resp.accesorios || [];
+      var accesorio = null;
+      for (var i = 0; i < accesorios.length; i++) {
+        if (accesorios[i].id === id) {
+          accesorio = accesorios[i];
+          break;
+        }
+      }
+
+      if (!accesorio) {
+        mostrarToast('❌ No se encontró el accesorio.', 'error');
+        return;
+      }
+
+      document.getElementById('accesorio-form-nombre').value = accesorio.nombre || '';
+      document.getElementById('accesorio-form-tipo').value = accesorio.tipo || '';
+      document.getElementById('accesorio-form-stock').value = accesorio.stockTotal || 0;
+      document.getElementById('accesorio-form-asignados').value = accesorio.asignados || 0;
+      document.getElementById('accesorio-form-descripcion').value = accesorio.descripcion || '';
+      document.getElementById('accesorio-form-editando').value = 'true';
+      document.getElementById('accesorio-form-id').value = accesorio.id;
+      document.getElementById('accesorio-form-titulo').innerHTML = '<i class="bi bi-pencil me-1"></i>Editar: ' + accesorio.nombre;
+
+      var container = document.getElementById('accesorio-form-container');
+      if (container) {
+        container.style.display = 'block';
+        document.getElementById('accesorio-form-nombre').focus();
+      }
+
+    })
+    .withFailureHandler(function(err) {
+      mostrarToast('❌ Error: ' + err.message, 'error');
+    })
+    .obtenerAccesoriosStock(APP.token);
+}
+/**
+ * Elimina un accesorio
+ */
+function eliminarAccesorio(id) {
+  if (!id) {
+    mostrarToast('⚠️ No se especificó el accesorio.', 'error');
+    return;
+  }
+
+  if (!confirm('⚠️ ¿Eliminar este accesorio?\n\nLos vehículos que lo tienen asignado perderán la referencia.\n\n¿Confirmas?')) {
+    return;
+  }
+
+  mostrarToast('🔄 Eliminando accesorio...', 'info');
+
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (resp.ok) {
+        mostrarToast('✅ ' + resp.mensaje, 'success');
+        cargarListaAccesorios();
+      } else {
+        mostrarToast('❌ ' + resp.error, 'error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      mostrarToast('❌ Error: ' + err.message, 'error');
+    })
+    .eliminarAccesorioStock(APP.token, id);
 }
 // Ejecutar
 forzarActualizacionSelects();
