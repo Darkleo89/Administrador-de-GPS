@@ -381,17 +381,16 @@ function _generarHTMLReporte(registro, fotos) {
     var gridFotos = '';
     if (fotos && fotos.length > 0) {
       var fotosHtml = '';
-      // Limitar a 12 fotos para no sobrecargar el PDF
-      var maxFotos = Math.min(fotos.length, 12);
+      var maxFotos = Math.min(fotos.length, 8); // Reducir a 8 fotos para ahorrar espacio
       for (var f = 0; f < maxFotos; f++) {
         var foto = fotos[f];
         var base64Data = foto.base64 || '';
         if (base64Data) {
           fotosHtml += `
-            <div style="display:inline-block;width:30%;margin:5px;text-align:center;">
+            <div style="display:inline-block;width:30%;margin:3px;text-align:center;">
               <img src="data:${foto.tipo || 'image/jpeg'};base64,${base64Data}" 
-                   style="width:100%;height:150px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0;">
-              <div style="font-size:7pt;color:#94a3b8;text-align:center;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                   style="width:100%;height:100px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0;">
+              <div style="font-size:6pt;color:#94a3b8;text-align:center;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                 ${foto.nombre || 'Evidencia'}
               </div>
             </div>
@@ -399,23 +398,19 @@ function _generarHTMLReporte(registro, fotos) {
         }
       }
       gridFotos = `
-        <div class="seccion">
-          <div class="seccion-titulo">📷 Evidencia Fotográfica</div>
-          <div style="text-align:center;">
-            ${fotosHtml}
-          </div>
-          <div style="font-size:7pt;color:#94a3b8;text-align:center;margin-top:4px;">
-            ${fotos.length > 12 ? '* Se muestran las primeras 12 fotos' : ''}
-          </div>
+        <div class="seccion-titulo">📷 Evidencia Fotográfica</div>
+        <div style="text-align:center;">
+          ${fotosHtml}
+        </div>
+        <div style="font-size:7pt;color:#94a3b8;text-align:center;margin-top:4px;">
+          ${fotos.length > 8 ? '* Se muestran las primeras 8 fotos' : ''}
         </div>
       `;
     } else {
       gridFotos = `
-        <div class="seccion">
-          <div class="seccion-titulo">📷 Evidencia Fotográfica</div>
-          <div style="color:#94a3b8; font-size:9pt; padding:4px 0;">
-            <i>Sin evidencia fotográfica adjunta.</i>
-          </div>
+        <div class="seccion-titulo">📷 Evidencia Fotográfica</div>
+        <div style="color:#94a3b8; font-size:9pt; padding:4px 0;">
+          <i>Sin evidencia fotográfica adjunta.</i>
         </div>
       `;
     }
@@ -427,65 +422,67 @@ function _generarHTMLReporte(registro, fotos) {
   <meta charset="UTF-8">
   <title>Reporte Técnico ${folio}</title>
   <style>
+    /* ✅ RESET Y ESTILOS BASE - MÁRGENES REDUCIDOS */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: Arial, Helvetica, sans-serif;
-      font-size: 10pt;
+      font-size: 9.5pt;
       color: #1a202c;
-      padding: 20px 25px;
-      line-height: 1.4;
+      padding: 12px 18px;
+      line-height: 1.3;
+      background: #fff;
+      /* ✅ FORZAR QUE EL CONTENIDO OCUPE TODA LA PÁGINA */
+      height: 100%;
+      min-height: 100vh;
     }
     
-    .tabla-layout {
-      width: 100%;
-      border-collapse: collapse;
-      border: none;
-      margin-bottom: 15px;
-    }
-    .tabla-layout td {
-      border: none;
-      vertical-align: top;
-      padding: 4px 0;
+    .contenedor {
+      max-width: 100%;
+      margin: 0 auto;
+      /* ✅ Asegurar que el contenido se ajuste */
+      height: auto;
     }
     
+    /* ✅ ENCABEZADO - MÁS COMPACTO */
     .header-border {
-      border-bottom: 3px solid #1a56db;
-      padding-bottom: 8px;
-      margin-bottom: 15px;
+      border-bottom: 2px solid #1a56db;
+      padding-bottom: 6px;
+      margin-bottom: 10px;
     }
     .logo {
-      font-size: 18pt;
+      font-size: 16pt;
       font-weight: 700;
       color: #1a56db;
     }
     .sub {
-      font-size: 8.5pt;
+      font-size: 7.5pt;
       color: #64748b;
     }
     .box-folio {
       text-align: right;
       background: #0f172a;
       color: #38bdf8;
-      padding: 8px 14px;
-      border-radius: 6px;
+      padding: 4px 12px;
+      border-radius: 4px;
       display: inline-block;
     }
     .folio-num {
-      font-size: 15pt;
+      font-size: 13pt;
       font-weight: 700;
       font-family: 'Courier New', monospace;
     }
     .folio-label {
-      font-size: 7.5pt;
+      font-size: 6.5pt;
       color: #94a3b8;
       text-transform: uppercase;
     }
     
+    /* ✅ BADGES - MÁS COMPACTOS */
     .badge {
       display: inline-block;
-      padding: 3px 12px;
-      border-radius: 12px;
-      font-size: 8.5pt;
+      padding: 2px 10px;
+      border-radius: 10px;
+      font-size: 7.5pt;
       font-weight: 600;
       text-transform: uppercase;
     }
@@ -497,34 +494,49 @@ function _generarHTMLReporte(registro, fotos) {
       background: #dbeafe;
       color: #1e40af;
       border: 1px solid #93c5fd;
-      margin-left: 5px;
+      margin-left: 4px;
     }
     
+    /* ✅ SECCIONES - MÁS COMPACTAS */
     .seccion {
-      margin-bottom: 12px;
+      margin-bottom: 8px;
       border: 1px solid #e2e8f0;
-      border-radius: 6px;
-      padding: 10px 14px;
+      border-radius: 4px;
+      padding: 6px 10px;
       background: #f8fafc;
+      page-break-inside: avoid;
     }
     .seccion-titulo {
-      font-size: 8.5pt;
+      font-size: 7.5pt;
       font-weight: 700;
       text-transform: uppercase;
       color: #475569;
       border-bottom: 1px solid #e2e8f0;
-      padding-bottom: 4px;
-      margin-bottom: 6px;
+      padding-bottom: 3px;
+      margin-bottom: 4px;
+    }
+    
+    /* ✅ TABLAS - MÁS COMPACTAS */
+    .tabla-layout {
+      width: 100%;
+      border-collapse: collapse;
+      border: none;
+      margin-bottom: 0;
+    }
+    .tabla-layout td {
+      border: none;
+      vertical-align: top;
+      padding: 2px 0;
     }
     
     .campo-label {
-      font-size: 7.5pt;
+      font-size: 6.5pt;
       color: #94a3b8;
       text-transform: uppercase;
       font-weight: 600;
     }
     .campo-valor {
-      font-size: 9.5pt;
+      font-size: 8.5pt;
       font-weight: 500;
       color: #0f172a;
     }
@@ -536,196 +548,198 @@ function _generarHTMLReporte(registro, fotos) {
     
     .detalle-box {
       background: #fff;
-      border-left: 3px solid #1a56db;
-      padding: 8px 12px;
-      font-size: 9.5pt;
-      line-height: 1.5;
+      border-left: 2px solid #1a56db;
+      padding: 4px 8px;
+      font-size: 8.5pt;
+      line-height: 1.4;
       color: #334155;
       white-space: pre-wrap;
+      max-height: 100px;
+      overflow: hidden;
     }
     
-    .tabla-costos {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 9.5pt;
-      margin-top: 4px;
-      background: white;
-    }
-    .tabla-costos th {
-      background: #0f172a;
-      color: #fff;
-      padding: 6px 10px;
-      text-align: left;
-      font-size: 8pt;
-      text-transform: uppercase;
-    }
-    .tabla-costos td {
-      padding: 6px 10px;
-      border-bottom: 1px solid #e2e8f0;
-    }
-    .tabla-costos .total td {
-      font-weight: 700;
-      background: #eff6ff;
-      color: #1a56db;
-      border-top: 2px solid #1a56db;
-    }
-    
+    /* ✅ TABLA DE FIRMAS - MÁS COMPACTA */
     .tabla-firmas {
       width: 100%;
       border-collapse: collapse;
-      margin-top: 20px;
+      margin-top: 8px;
+      page-break-inside: avoid;
     }
     .tabla-firmas td {
       width: 33.3%;
       text-align: center;
-      padding: 0 10px;
+      padding: 0 5px;
     }
     .linea-firma {
-      border-top: 1.5px solid #334155;
-      padding-top: 4px;
-      margin-top: 35px;
+      border-top: 1px solid #334155;
+      padding-top: 2px;
+      margin-top: 20px;
     }
     .firma-box .nombre {
-      font-size: 8.5pt;
+      font-size: 7.5pt;
       font-weight: 600;
     }
     .firma-box .cargo {
-      font-size: 7.5pt;
+      font-size: 6.5pt;
       color: #94a3b8;
     }
     
+    /* ✅ PIE DE PÁGINA - FIJO AL FINAL */
     .footer {
-      margin-top: 15px;
+      margin-top: 8px;
       border-top: 1px solid #e2e8f0;
-      padding-top: 8px;
-      font-size: 7.5pt;
+      padding-top: 4px;
+      font-size: 6.5pt;
       color: #94a3b8;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      /* ✅ FORZAR QUE EL PIE QUEDE EN LA PRIMERA PÁGINA */
+      page-break-after: avoid;
+      page-break-inside: avoid;
+    }
+    
+    .fotos-grid {
+      page-break-inside: avoid;
+    }
+    
+    .seccion:last-child {
+      margin-bottom: 0;
+    }
+    
+    /* ✅ FORZAR UNA SOLA PÁGINA */
+    @page {
+      size: A4;
+      margin: 10mm 12mm;
     }
   </style>
 </head>
 <body>
-
-  <!-- ─── ENCABEZADO ─── -->
-  <table class="tabla-layout header-border">
-    <tr>
-      <td>
-        <div class="logo">🚛 Fleet Manager</div>
-        <div class="sub">Sistema de Gestión de Flotas · Samsara</div>
-        <div class="sub" style="margin-top:2px; font-size:8pt;">
-          Fecha de emisión: ${fechaEmision}
-        </div>
-      </td>
-      <td style="text-align: right;">
-        <div class="box-folio">
-          <div class="folio-num">${folio}</div>
-          <div class="folio-label">Orden de Servicio Técnico</div>
-        </div>
-      </td>
-    </tr>
-  </table>
-
-  <!-- ─── INDICADORES BADGES ─── -->
-  <div style="margin-bottom:12px;">
-    <span class="badge badge-estado">${estado}</span>
-    <span class="badge badge-servicio">${badgeService}</span>
-  </div>
-
-  <!-- ─── DATOS DEL VEHÍCULO ─── -->
-  <div class="seccion">
-    <div class="seccion-titulo">🚗 Datos del Vehículo y Dispositivo</div>
-    <table class="tabla-layout" style="margin-bottom:0;">
-      <tr>
-        <td style="width: 50%;">
-          <div class="campo-label">Económico</div>
-          <div class="campo-valor">${economico}</div>
-        </td>
-        <td style="width: 50%;">
-          <div class="campo-label">Placas</div>
-          <div class="campo-valor">${placas}</div>
-        </td>
-      </tr>
+  <div class="contenedor">
+    <!-- ─── ENCABEZADO ─── -->
+    <table class="tabla-layout header-border">
       <tr>
         <td>
-          <div class="campo-label">Serie del GPS / Gateway</div>
-          <div class="campo-valor mono">${serieGPS}</div>
-        </td>
-        <td>
-          <div class="campo-label">Plataforma</div>
-          <div class="campo-valor">${plataforma}</div>
-        </td>
-      </tr>
-      <tr>
-        <td>
-          <div class="campo-label">Fecha del Servicio</div>
-          <div class="campo-valor">${fechaServicio}</div>
-        </td>
-        <td>
-          <div class="campo-label">Tipo de Revisión</div>
-          <div class="campo-valor">${badgeService}</div>
-        </td>
-      </tr>
-    </table>
-  </div>
-
-  <!-- ─── TÉCNICO RESPONSABLE ─── -->
-  <div class="seccion">
-    <div class="seccion-titulo">👤 Técnico Responsable</div>
-    <table class="tabla-layout" style="margin-bottom:0;">
-      <tr>
-        <td style="width: 50%;">
-          <div class="campo-label">ID Técnico</div>
-          <div class="campo-valor mono">${tecnicoId}</div>
-        </td>
-        <td style="width: 50%;">
-          <div class="campo-label">Nombre del Técnico</div>
-          <div class="campo-valor">${tecnicoNombre}</div>
-        </td>
-      </tr>
-    </table>
-  </div>
-
-  <!-- ─── DETALLE DEL TRABAJO ─── -->
-  <div class="seccion">
-    <div class="seccion-titulo">📋 Detalle del Trabajo Realizado</div>
-    <div class="detalle-box">${detalle.replace(/\n/g, '<br>')}</div>
-  </div>
-
-  <!-- ─── EVIDENCIA FOTOGRÁFICA ─── -->
-  ${gridFotos}
-
-  <!-- ─── FIRMAS ─── -->
-  <div class="seccion">
-    <div class="seccion-titulo">✍️ Firmas de Autorización</div>
-    <table class="tabla-firmas">
-      <tr>
-        <td>
-          <div class="linea-firma">
-            <div class="nombre">${tecnicoNombre}</div>
-            <div class="cargo">Técnico Responsable</div>
+          <div class="logo">🚛 Fleet Manager</div>
+          <div class="sub">Sistema de Gestión de Flotas · Samsara</div>
+          <div class="sub" style="margin-top:1px; font-size:7pt;">
+            Fecha de emisión: ${fechaEmision}
           </div>
         </td>
-        <td>
-          <div class="linea-firma">
-            <div class="nombre">_______________</div>
-            <div class="cargo">Revisor / Autorizó</div>
-          </div>
-        </td>
-        <td>
-          <div class="linea-firma">
-            <div class="nombre">_______________</div>
-            <div class="cargo">Gerencia General</div>
+        <td style="text-align: right;">
+          <div class="box-folio">
+            <div class="folio-num">${folio}</div>
+            <div class="folio-label">Orden de Servicio Técnico</div>
           </div>
         </td>
       </tr>
     </table>
-  </div>
 
-  <!-- ─── PIE ─── -->
-  <div class="footer">
-    <span>Folio ${folio} · Generado el ${fechaEmision}</span>
-    <span>Documento de control interno · Confidencial</span>
-  </div>
+    <!-- ─── INDICADORES BADGES ─── -->
+    <div style="margin-bottom:8px;">
+      <span class="badge badge-estado">${estado}</span>
+      <span class="badge badge-servicio">${badgeService}</span>
+    </div>
 
+    <!-- ─── DATOS DEL VEHÍCULO ─── -->
+    <div class="seccion">
+      <div class="seccion-titulo">🚗 Datos del Vehículo y Dispositivo</div>
+      <table class="tabla-layout" style="margin-bottom:0;">
+        <tr>
+          <td style="width: 50%;">
+            <div class="campo-label">Económico</div>
+            <div class="campo-valor">${economico}</div>
+          </td>
+          <td style="width: 50%;">
+            <div class="campo-label">Placas</div>
+            <div class="campo-valor">${placas}</div>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <div class="campo-label">Serie del GPS / Gateway</div>
+            <div class="campo-valor mono">${serieGPS}</div>
+          </td>
+          <td>
+            <div class="campo-label">Plataforma</div>
+            <div class="campo-valor">${plataforma}</div>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <div class="campo-label">Fecha del Servicio</div>
+            <div class="campo-valor">${fechaServicio}</div>
+          </td>
+          <td>
+            <div class="campo-label">Tipo de Revisión</div>
+            <div class="campo-valor">${badgeService}</div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ─── TÉCNICO RESPONSABLE ─── -->
+    <div class="seccion">
+      <div class="seccion-titulo">👤 Técnico Responsable</div>
+      <table class="tabla-layout" style="margin-bottom:0;">
+        <tr>
+          <td style="width: 50%;">
+            <div class="campo-label">ID Técnico</div>
+            <div class="campo-valor mono">${tecnicoId}</div>
+          </td>
+          <td style="width: 50%;">
+            <div class="campo-label">Nombre del Técnico</div>
+            <div class="campo-valor">${tecnicoNombre}</div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ─── DETALLE DEL TRABAJO ─── -->
+    <div class="seccion">
+      <div class="seccion-titulo">📋 Detalle del Trabajo Realizado</div>
+      <div class="detalle-box">${detalle.replace(/\n/g, '<br>')}</div>
+    </div>
+
+    <!-- ─── EVIDENCIA FOTOGRÁFICA ─── -->
+    <div class="seccion fotos-grid">
+      ${gridFotos}
+    </div>
+
+    <!-- ─── FIRMAS ─── -->
+    <div class="seccion" style="page-break-inside: avoid;">
+      <div class="seccion-titulo">✍️ Firmas de Autorización</div>
+      <table class="tabla-firmas">
+        <tr>
+          <td>
+            <div class="linea-firma">
+              <div class="nombre">${tecnicoNombre}</div>
+              <div class="cargo">Técnico Responsable</div>
+            </div>
+          </td>
+          <td>
+            <div class="linea-firma">
+              <div class="nombre">_______________</div>
+              <div class="cargo">Revisor / Autorizó</div>
+            </div>
+          </td>
+          <td>
+            <div class="linea-firma">
+              <div class="nombre">_______________</div>
+              <div class="cargo">Gerencia General</div>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- ─── PIE ─── -->
+    <div class="footer">
+      <span>Folio ${folio}</span>
+      <span>Generado el ${fechaEmision}</span>
+      <span>Documento de control interno · Confidencial</span>
+    </div>
+  </div>
 </body>
 </html>`;
 

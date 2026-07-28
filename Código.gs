@@ -9017,21 +9017,11 @@ function obtenerFotosCarpeta(token, folderId) {
       if (mimeType.startsWith('image/')) {
         var fileId = file.getId();
         
-        // ✅ URL de vista previa (para iframe)
-        var previewUrl = 'https://drive.google.com/file/d/' + fileId + '/preview';
-        
-        // ✅ URL de miniatura
-        var thumbnailUrl = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w256-h256';
-        
-        // ✅ URL de vista (para abrir en nueva pestaña)
-        var viewUrl = 'https://drive.google.com/file/d/' + fileId + '/view';
-        
         fotos.push({
           nombre: file.getName(),
-          url: previewUrl,        // ✅ URL para el modal
-          viewUrl: viewUrl,       // ✅ URL para abrir en nueva pestaña
-          thumbnail: thumbnailUrl,
           id: fileId,
+          url: 'https://drive.google.com/uc?export=view&id=' + fileId + '&confirm=no_antivirus',
+          thumbnail: 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w256-h256',
           mimeType: mimeType
         });
         
@@ -9043,6 +9033,66 @@ function obtenerFotosCarpeta(token, folderId) {
 
   } catch (err) {
     console.error('❌ Error en obtenerFotosCarpeta:', err);
+    return { ok: false, error: err.message };
+  }
+}
+// ✅ VERSIÓN OPTIMIZADA - Backend
+function obtenerRegistros(token, filtros) {
+  console.log('📊 obtenerRegistros - INICIO', new Date().toISOString());
+  
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+
+    var sesion = sesionResp.sesion;
+    var sheet = SHEETS.BITACORA();
+    
+    // ✅ LEER DATOS UNA SOLA VEZ
+    var datos = sheet.getDataRange().getValues();
+    console.log('📊 Datos leídos:', datos.length, 'filas');
+    
+    var headers = datos[0];
+    var registros = [];
+
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
+      if (!fila || !fila[0]) continue;
+
+      // ✅ FILTROS BÁSICOS (rápidos)
+      if (filtros.estado && fila[12] !== filtros.estado) continue;
+      if (filtros.tecnico && fila[7] !== filtros.tecnico) continue;
+      if (sesion.rol === 3 && fila[7]?.toString() !== sesion.usuarioId) continue;
+
+      // ✅ CONSTRUIR REGISTRO (solo si pasa filtros)
+      var reg = {};
+      for (var j = 0; j < headers.length; j++) {
+        var valor = fila[j];
+        if (valor instanceof Date) {
+          valor = valor.toISOString();
+        } else if (valor === undefined || valor === null) {
+          valor = '';
+        } else if (typeof valor === 'boolean' || typeof valor === 'number') {
+          // dejar tal cual
+        } else {
+          valor = valor.toString();
+        }
+        reg[headers[j]] = valor;
+      }
+      registros.push(reg);
+    }
+
+    console.log('📊 Registros filtrados:', registros.length);
+    
+    // ✅ SIN SpreadsheetApp.flush() - NO es necesario para lectura
+
+    return { 
+      ok: true, 
+      registros: registros, 
+      rol: sesion.rol 
+    };
+
+  } catch (err) {
+    console.error('❌ Error en obtenerRegistros:', err);
     return { ok: false, error: err.message };
   }
 }

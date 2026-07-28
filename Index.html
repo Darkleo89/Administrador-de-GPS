@@ -545,21 +545,22 @@
             <h2><i class="bi bi-table me-2"></i>Registros y aprobaciones</h2>
             <div class="d-flex gap-2">
               <button class="btn btn-outline-secondary btn-sm" onclick="recargarRegistros()" title="Recargar registros">
-                <i class="bi bi-arrow-repeat me-1"></i>Actualizar
-              </button>
+        <i class="bi bi-arrow-repeat me-1"></i>Actualizar
+      </button>
             </div>
           </div>
 
           <!-- Filtros -->
           <div class="fm-filtros">
             <div class="row g-2 align-items-end">
-              <!-- ✅ CORREGIDO: Estado -->
               <div class="col-6 col-md-3">
                 <label class="form-label small">Estado</label>
                 <select id="fil-estado" class="form-select form-select-sm" onchange="cargarRegistros()">
           <option value="">Todos</option>
           <option value="Borrador">Borrador</option>
           <option value="En revisión">En revisión</option>
+          <option value="Listo para pago">Listo para pago</option>
+          <option value="En proceso de pago">En proceso de pago</option>
           <option value="Aprobado">Aprobado</option>
           <option value="Pagado">Pagado</option>
         </select>
@@ -584,6 +585,25 @@
         </button>
               </div>
             </div>
+
+            <!-- ✅ NUEVO: Botones de acción -->
+            <div class="row g-2 mt-3 pt-2 border-top">
+              <div class="col-12 d-flex gap-2 flex-wrap">
+                <button class="btn btn-sm btn-primary" onclick="generarReporteSeleccion()">
+          <i class="bi bi-file-pdf me-1"></i>📄 Generar reporte
+        </button>
+                <button class="btn btn-sm btn-success" onclick="marcarComoPagado()">
+          <i class="bi bi-check-circle me-1"></i>💰 Marcar como pagado
+        </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="seleccionarTodosRegistros(true)">
+          <i class="bi bi-check-all me-1"></i>Seleccionar todos
+        </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="seleccionarTodosRegistros(false)">
+          <i class="bi bi-x me-1"></i>Deseleccionar todos
+        </button>
+                <span class="text-muted small align-self-center" id="contador-seleccionados">0 seleccionados</span>
+              </div>
+            </div>
           </div>
 
           <!-- Tabla de registros -->
@@ -591,6 +611,9 @@
             <table class="table table-hover fm-tabla" id="tabla-registros">
               <thead>
                 <tr>
+                  <th style="width: 30px;">
+                    <input type="checkbox" id="checkbox-todos" onchange="seleccionarTodosRegistros(this.checked)">
+                  </th>
                   <th>Folio</th>
                   <th>Fecha</th>
                   <th>Económico</th>
@@ -603,7 +626,7 @@
               </thead>
               <tbody id="tabla-body">
                 <tr>
-                  <td colspan="8" class="text-center text-muted py-3">
+                  <td colspan="9" class="text-center text-muted py-3">
                     <div class="spinner-border spinner-border-sm me-2"></div>Cargando registros...
                   </td>
                 </tr>
@@ -619,10 +642,6 @@
             <p>No hay registros con los filtros seleccionados.</p>
           </div>
 
-
-
-
-          <!-- ✅ CONTENEDOR DE PAGINACIÓN -->
           <div id="paginacion-container" class="mt-2"></div>
         </div><!-- /panel-registros -->
 
@@ -1614,90 +1633,90 @@
       </div>
     </div>
   </div>
-    <!-- ================================================== -->
-<!-- MODAL PARA ADMINISTRAR ACCESORIOS                  -->
-<!-- ================================================== -->
-<div class="modal fade" id="modalAdminAccesorios" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">
-          <i class="bi bi-tools me-2"></i>Administrar Accesorios
-        </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <!-- Mensaje informativo -->
-        <div class="alert alert-info small mb-3">
-          <i class="bi bi-info-circle me-1"></i>
-          Los accesorios se pueden asignar a vehículos desde el formulario de reportes.
-          <span class="d-block mt-1 text-muted" style="font-size: 11px;">
+  <!-- ================================================== -->
+  <!-- MODAL PARA ADMINISTRAR ACCESORIOS                  -->
+  <!-- ================================================== -->
+  <div class="modal fade" id="modalAdminAccesorios" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">
+            <i class="bi bi-tools me-2"></i>Administrar Accesorios
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Mensaje informativo -->
+          <div class="alert alert-info small mb-3">
+            <i class="bi bi-info-circle me-1"></i>
+            Los accesorios se pueden asignar a vehículos desde el formulario de reportes.
+            <span class="d-block mt-1 text-muted" style="font-size: 11px;">
             🔒 Solo Administradores y Revisores pueden gestionar accesorios.
           </span>
-        </div>
+          </div>
 
-        <!-- Formulario para nuevo/edición accesorio -->
-        <div id="accesorio-form-container" style="display:none;" class="mb-3 p-3 border rounded bg-light">
-          <h6 id="accesorio-form-titulo" class="mb-2"><i class="bi bi-plus-circle me-1"></i>Nuevo accesorio</h6>
-          <div class="row g-2">
-            <div class="col-12 col-md-4">
-              <label class="form-label small">Nombre <span class="text-danger">*</span></label>
-              <input type="text" id="accesorio-form-nombre" class="form-control form-control-sm" 
+          <!-- Formulario para nuevo/edición accesorio -->
+          <div id="accesorio-form-container" style="display:none;" class="mb-3 p-3 border rounded bg-light">
+            <h6 id="accesorio-form-titulo" class="mb-2"><i class="bi bi-plus-circle me-1"></i>Nuevo accesorio</h6>
+            <div class="row g-2">
+              <div class="col-12 col-md-4">
+                <label class="form-label small">Nombre <span class="text-danger">*</span></label>
+                <input type="text" id="accesorio-form-nombre" class="form-control form-control-sm"
                      placeholder="Ej: Arnés VG34" maxlength="50">
-            </div>
-            <div class="col-12 col-md-4">
-              <label class="form-label small">Tipo <span class="text-danger">*</span></label>
-              <input type="text" id="accesorio-form-tipo" class="form-control form-control-sm" 
+              </div>
+              <div class="col-12 col-md-4">
+                <label class="form-label small">Tipo <span class="text-danger">*</span></label>
+                <input type="text" id="accesorio-form-tipo" class="form-control form-control-sm"
                      placeholder="Ej: Arnés VG34">
-            </div>
-            <div class="col-6 col-md-2">
-              <label class="form-label small">Stock Total</label>
-              <input type="number" id="accesorio-form-stock" class="form-control form-control-sm" 
+              </div>
+              <div class="col-6 col-md-2">
+                <label class="form-label small">Stock Total</label>
+                <input type="number" id="accesorio-form-stock" class="form-control form-control-sm"
                      value="50" min="0">
-            </div>
-            <div class="col-6 col-md-2">
-              <label class="form-label small">Asignados</label>
-              <input type="number" id="accesorio-form-asignados" class="form-control form-control-sm" 
+              </div>
+              <div class="col-6 col-md-2">
+                <label class="form-label small">Asignados</label>
+                <input type="number" id="accesorio-form-asignados" class="form-control form-control-sm"
                      value="0" min="0" readonly>
-            </div>
-            <div class="col-12">
-              <label class="form-label small">Descripción</label>
-              <input type="text" id="accesorio-form-descripcion" class="form-control form-control-sm" 
+              </div>
+              <div class="col-12">
+                <label class="form-label small">Descripción</label>
+                <input type="text" id="accesorio-form-descripcion" class="form-control form-control-sm"
                      placeholder="Breve descripción del accesorio">
-            </div>
-            <div class="col-12 col-md-4 d-flex align-items-end gap-2">
-              <button class="btn btn-primary btn-sm" onclick="guardarAccesorioForm()">
+              </div>
+              <div class="col-12 col-md-4 d-flex align-items-end gap-2">
+                <button class="btn btn-primary btn-sm" onclick="guardarAccesorioForm()">
                 <i class="bi bi-check me-1"></i>Guardar
               </button>
-              <button class="btn btn-secondary btn-sm" onclick="cerrarFormAccesorio()">
+                <button class="btn btn-secondary btn-sm" onclick="cerrarFormAccesorio()">
                 <i class="bi bi-x me-1"></i>Cancelar
               </button>
+              </div>
+            </div>
+            <input type="hidden" id="accesorio-form-editando" value="false">
+            <input type="hidden" id="accesorio-form-id" value="">
+          </div>
+
+          <!-- Tabla de accesorios -->
+          <div id="accesorios-list-container">
+            <div class="text-center text-muted py-4">
+              <div class="spinner-border spinner-border-sm me-2"></div>
+              Cargando accesorios...
             </div>
           </div>
-          <input type="hidden" id="accesorio-form-editando" value="false">
-          <input type="hidden" id="accesorio-form-id" value="">
         </div>
-
-        <!-- Tabla de accesorios -->
-        <div id="accesorios-list-container">
-          <div class="text-center text-muted py-4">
-            <div class="spinner-border spinner-border-sm me-2"></div>
-            Cargando accesorios...
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline-secondary btn-sm" onclick="cargarListaAccesorios()">
+        <div class="modal-footer">
+          <button class="btn btn-outline-secondary btn-sm" onclick="cargarListaAccesorios()">
           <i class="bi bi-arrow-repeat me-1"></i>Recargar
         </button>
-        <button class="btn btn-primary btn-sm" onclick="mostrarFormNuevoAccesorio()">
+          <button class="btn btn-primary btn-sm" onclick="mostrarFormNuevoAccesorio()">
           <i class="bi bi-plus-circle me-1"></i>Nuevo accesorio
         </button>
-        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+          <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+        </div>
       </div>
     </div>
   </div>
-</div>
   <!-- ================================================== -->
   <!-- MODAL PARA ADMINISTRAR ESTADOS DE VEHÍCULOS       -->
   <!-- ================================================== -->

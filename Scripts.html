@@ -1464,66 +1464,6 @@ function cargarRegistros() {
     })
     .obtenerRegistros(APP.token, filtros); // ✅ UNA SOLA LLAMADA
 }
-// ✅ VERSIÓN OPTIMIZADA - Backend
-function obtenerRegistros(token, filtros) {
-  console.log('📊 obtenerRegistros - INICIO', new Date().toISOString());
-  
-  try {
-    var sesionResp = validarSesion(token);
-    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
-
-    var sesion = sesionResp.sesion;
-    var sheet = SHEETS.BITACORA();
-    
-    // ✅ LEER DATOS UNA SOLA VEZ
-    var datos = sheet.getDataRange().getValues();
-    console.log('📊 Datos leídos:', datos.length, 'filas');
-    
-    var headers = datos[0];
-    var registros = [];
-
-    for (var i = 1; i < datos.length; i++) {
-      var fila = datos[i];
-      if (!fila || !fila[0]) continue;
-
-      // ✅ FILTROS BÁSICOS (rápidos)
-      if (filtros.estado && fila[12] !== filtros.estado) continue;
-      if (filtros.tecnico && fila[7] !== filtros.tecnico) continue;
-      if (sesion.rol === 3 && fila[7]?.toString() !== sesion.usuarioId) continue;
-
-      // ✅ CONSTRUIR REGISTRO (solo si pasa filtros)
-      var reg = {};
-      for (var j = 0; j < headers.length; j++) {
-        var valor = fila[j];
-        if (valor instanceof Date) {
-          valor = valor.toISOString();
-        } else if (valor === undefined || valor === null) {
-          valor = '';
-        } else if (typeof valor === 'boolean' || typeof valor === 'number') {
-          // dejar tal cual
-        } else {
-          valor = valor.toString();
-        }
-        reg[headers[j]] = valor;
-      }
-      registros.push(reg);
-    }
-
-    console.log('📊 Registros filtrados:', registros.length);
-    
-    // ✅ SIN SpreadsheetApp.flush() - NO es necesario para lectura
-
-    return { 
-      ok: true, 
-      registros: registros, 
-      rol: sesion.rol 
-    };
-
-  } catch (err) {
-    console.error('❌ Error en obtenerRegistros:', err);
-    return { ok: false, error: err.message };
-  }
-}
 
 function renderRegistros(registros) {
   var tbody = document.getElementById('tabla-body');
@@ -1537,6 +1477,7 @@ function renderRegistros(registros) {
 
   if (!registros || registros.length === 0) {
     if (vacioEl) vacioEl.classList.remove('d-none');
+    actualizarContadorSeleccionados();
     return;
   }
 
@@ -1545,16 +1486,25 @@ function renderRegistros(registros) {
   // ✅ RENDERIZAR MÁS RÁPIDO - Usar fragmentos de documento
   var fragment = document.createDocumentFragment();
 
-  registros.forEach(function(r) {
+  registros.forEach(function(r, index) {
     var badgeCls = badgeClase(r.ESTADO);
     var fecha = formatFecha(r.FECHA_SERVICIO);
 
     // ✅ OBTENER CLASE PARA EL BADGE DE TIPO
     var tipoBadgeCls = obtenerClaseTipo(r.TIPO_REVISION);
 
+    // ✅ Generar ID único para el checkbox
+    var checkboxId = 'sel-' + r.FOLIO + '-' + index;
+
     // Fila de tabla (escritorio)
     var tr = document.createElement('tr');
+    tr.id = 'fila-' + r.FOLIO;
     tr.innerHTML = `
+      <td>
+        <input type="checkbox" class="form-check-input registro-checkbox" 
+               id="${checkboxId}" value="${r.FOLIO}"
+               onchange="actualizarContadorSeleccionados()">
+      </td>
       <td><code>${r.FOLIO}</code></td>
       <td>${fecha}</td>
       <td>${r.ECONOMICO}</td>
@@ -1572,12 +1522,18 @@ function renderRegistros(registros) {
       </td>`;
     fragment.appendChild(tr);
 
-    // Card (móvil)
+    // Card (móvil) - con checkbox también
     var card = document.createElement('div');
     card.className = 'fm-reg-card';
+    card.id = 'card-' + r.FOLIO;
     card.innerHTML = `
       <div class="d-flex justify-content-between align-items-start">
-        <span class="folio">${r.FOLIO}</span>
+        <div>
+          <input type="checkbox" class="form-check-input me-2 registro-checkbox" 
+                 id="${checkboxId}-card" value="${r.FOLIO}"
+                 onchange="actualizarContadorSeleccionados()">
+          <span class="folio">${r.FOLIO}</span>
+        </div>
         <span class="badge ${badgeCls}">${r.ESTADO}</span>
       </div>
       <div class="meta">${fecha} · ${r.ECONOMICO} · <span class="badge ${tipoBadgeCls}">${r.TIPO_REVISION}</span></div>
@@ -1592,7 +1548,184 @@ function renderRegistros(registros) {
   });
 
   tbody.appendChild(fragment);
+  
+  // ✅ Actualizar contador
+  actualizarContadorSeleccionados();
+  
+  // ✅ Sincronizar checkbox "Seleccionar todos"
+  sincronizarCheckboxTodos();
 }
+/**
+ * Actualiza el contador de elementos seleccionados
+ */
+function actualizarContadorSeleccionados() {
+  var checkboxes = document.querySelectorAll('.registro-checkbox:checked');
+  var total = document.querySelectorAll('.registro-checkbox').length;
+  var contador = document.getElementById('contador-seleccionados');
+  if (contador) {
+    contador.textContent = checkboxes.length + ' seleccionados de ' + total;
+  }
+  
+  // Actualizar el checkbox "Seleccionar todos"
+  sincronizarCheckboxTodos();
+}
+/**
+ * Sincroniza el estado del checkbox "Seleccionar todos"
+ */
+function sincronizarCheckboxTodos() {
+  var checkboxes = document.querySelectorAll('.registro-checkbox');
+  var checked = document.querySelectorAll('.registro-checkbox:checked');
+  var chkTodos = document.getElementById('checkbox-todos');
+  if (chkTodos && checkboxes.length > 0) {
+    chkTodos.checked = checkboxes.length === checked.length;
+    chkTodos.indeterminate = checked.length > 0 && checked.length < checkboxes.length;
+  }
+}
+/**
+ * Selecciona o deselecciona todos los checkboxes
+ * @param {boolean} seleccionar - true para seleccionar todos
+ */
+function seleccionarTodosRegistros(seleccionar) {
+  var checkboxes = document.querySelectorAll('.registro-checkbox');
+  checkboxes.forEach(function(cb) {
+    cb.checked = seleccionar;
+  });
+  actualizarContadorSeleccionados();
+}
+/**
+ * Obtiene los folios seleccionados
+ * @returns {Array} Array de folios
+ */
+function obtenerFoliosSeleccionados() {
+  var checkboxes = document.querySelectorAll('.registro-checkbox:checked');
+  var folios = [];
+  checkboxes.forEach(function(cb) {
+    folios.push(cb.value);
+  });
+  return folios;
+}
+// ============================================================
+// REPORTE MÚLTIPLE Y CAMBIO DE ESTADO
+// ============================================================
+
+/**
+ * Genera un reporte PDF con los folios filtrados (estado "Listo para pago")
+ */
+function generarReporteSeleccion() {
+  // Obtener los folios filtrados actualmente
+  var folios = obtenerFoliosFiltrados();
+  
+  if (folios.length === 0) {
+    mostrarToast('⚠️ No hay folios en estado "Listo para pago" para generar el reporte.', 'warning');
+    return;
+  }
+
+  if (!confirm('📄 ¿Generar reporte para ' + folios.length + ' folios?\n\n' +
+               'Los folios cambiarán automáticamente a "En proceso de pago".')) {
+    return;
+  }
+
+  mostrarToast('📄 Generando reporte para ' + folios.length + ' folios...', 'info');
+
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (resp.ok) {
+        mostrarToast('✅ Reporte generado: ' + resp.foliosProcesados + ' folios', 'success');
+        
+        // ✅ Descargar el PDF
+        if (resp.pdfBase64) {
+          var link = document.createElement('a');
+          link.download = resp.nombre || 'Reporte_Revisiones.pdf';
+          link.href = 'data:application/pdf;base64,' + resp.pdfBase64;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+        
+        // ✅ Recargar la tabla
+        recargarRegistros();
+      } else {
+        mostrarToast('❌ Error: ' + resp.error, 'error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error en generarReporteSeleccion:', err);
+      mostrarToast('❌ Error: ' + err.message, 'error');
+    })
+    .generarReporteMultiple(APP.token, folios);
+}
+
+/**
+ * Obtiene los folios que están en estado "Listo para pago" según los filtros actuales
+ * @returns {Array} Array de folios
+ */
+function obtenerFoliosFiltrados() {
+  var filas = document.querySelectorAll('#tabla-body tr');
+  var folios = [];
+  
+  filas.forEach(function(tr) {
+    var estadoCell = tr.querySelector('td:nth-child(8) .badge');
+    if (estadoCell) {
+      var estado = estadoCell.textContent.trim();
+      if (estado === 'Listo para pago') {
+        var folioCell = tr.querySelector('td:nth-child(2) code');
+        if (folioCell) {
+          folios.push(folioCell.textContent.trim());
+        }
+      }
+    }
+  });
+  
+  // Si no hay filas en la tabla, intentar desde los datos filtrados
+  if (folios.length === 0) {
+    // Fallback: usar los registros en caché
+    if (_cacheRegistros && _cacheRegistros.length > 0) {
+      _cacheRegistros.forEach(function(r) {
+        if (r.ESTADO === 'Listo para pago' && r.FOLIO) {
+          folios.push(r.FOLIO);
+        }
+      });
+    }
+  }
+  
+  return folios;
+}
+
+/**
+ * Marca los folios seleccionados como "Pagado"
+ */
+function marcarComoPagado() {
+  var folios = obtenerFoliosSeleccionados();
+  
+  if (folios.length === 0) {
+    mostrarToast('⚠️ Selecciona al menos un folio para marcar como pagado.', 'warning');
+    return;
+  }
+
+  if (!confirm('💰 ¿Marcar ' + folios.length + ' folios como "Pagado"?\n\n' +
+               '⚠️ Esta acción es irreversible.')) {
+    return;
+  }
+
+  mostrarToast('💰 Marcando ' + folios.length + ' folios como pagados...', 'info');
+
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (resp.ok) {
+        mostrarToast('✅ ' + resp.mensaje, 'success');
+        recargarRegistros();
+      } else {
+        mostrarToast('❌ Error: ' + resp.error, 'error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error en marcarComoPagado:', err);
+      mostrarToast('❌ Error: ' + err.message, 'error');
+    })
+    .marcarFoliosComoPagados(APP.token, folios);
+}
+
+
 /**
  * Devuelve la clase CSS para el badge de tipo de revisión
  * @param {string} tipo - Tipo de revisión (IT, R, IM, Pendiente, etc.)
@@ -1735,10 +1868,7 @@ function abrirDetalle(reg) {
     cargarFotosEnModal(reg.FOTOS_DRIVE_URL);
   }
 }
-/**
- * Carga las fotos de una carpeta de Drive y las muestra en el modal
- * @param {string} folderUrl - URL de la carpeta en Drive
- */
+
 /**
  * Carga las fotos de una carpeta de Drive y las muestra en el modal
  * @param {string} folderUrl - URL de la carpeta en Drive
@@ -1761,7 +1891,7 @@ function cargarFotosEnModal(folderUrl) {
     return;
   }
 
-  // ✅ Mostrar loading
+  // Mostrar loading
   container.innerHTML = `
     <div class="col-12 text-center text-muted small py-3">
       <div class="spinner-border spinner-border-sm me-2"></div>
@@ -1791,34 +1921,28 @@ function cargarFotosEnModal(folderUrl) {
         col.className = 'col-6 col-md-4 col-lg-3 mb-2';
         
         var nombre = foto.nombre || 'foto';
-        var ext = nombre.split('.').pop().toLowerCase();
-        var isVideo = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext);
+        var fileId = foto.id;
         
-        if (isVideo) {
-          // ✅ Para videos, mostrar un reproductor
-          col.innerHTML = `
-            <div class="card h-100" style="cursor: pointer;" onclick="window.open('${foto.url}', '_blank')">
-              <video src="${foto.downloadUrl}" class="card-img-top" 
-                     style="height: 120px; object-fit: cover; background: #000;"
-                     muted></video>
-              <div class="card-body p-1 text-center">
-                <small class="text-muted text-truncate d-block" style="font-size: 10px;">🎬 ${nombre.substring(0, 20)}</small>
-              </div>
+        // ✅ Usar la URL de miniatura de Google Drive
+        var thumbnailUrl = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w256-h256';
+        
+        // ✅ URL de vista (se usará en el modal)
+        var viewUrl = 'https://drive.google.com/file/d/' + fileId + '/view';
+        
+        col.innerHTML = `
+          <div class="card h-100" style="cursor: pointer; border: 1px solid #e2e8f0; transition: transform 0.2s;" 
+               onmouseover="this.style.transform='scale(1.02)'" 
+               onmouseout="this.style.transform='scale(1)'"
+               onclick="verFotoAmpliada('${viewUrl}', '${nombre}')">
+            <img src="${thumbnailUrl}" class="card-img-top" alt="${nombre}" 
+                 style="height: 120px; object-fit: cover; background: #f0f0f0;"
+                 loading="lazy"
+                 onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%22 height=%22100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f0f0f0%22/%3E%3Ctext x=%2250%22 y=%2250%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22 font-size=%2212%22%3E📷%3C/text%3E%3C/svg%3E'">
+            <div class="card-body p-1 text-center">
+              <small class="text-muted text-truncate d-block" style="font-size: 10px;">${nombre.substring(0, 20)}</small>
             </div>
-          `;
-        } else {
-          // ✅ Para imágenes, usar la miniatura de Google Drive
-          col.innerHTML = `
-            <div class="card h-100" style="cursor: pointer;" onclick="verFotoAmpliada('${foto.downloadUrl}', '${nombre}')">
-              <img src="${foto.thumbnail}" class="card-img-top" alt="${nombre}" 
-                   style="height: 120px; object-fit: cover; background: #f0f0f0;"
-                   onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%22 height=%22100%22%3E%3Crect width=%22100%22 height=%22100%22 fill=%22%23f0f0f0%22/%3E%3Ctext x=%2250%22 y=%2250%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22 font-size=%2212%22%3E📷%3C/text%3E%3C/svg%3E'">
-              <div class="card-body p-1 text-center">
-                <small class="text-muted text-truncate d-block" style="font-size: 10px;">${nombre.substring(0, 20)}</small>
-              </div>
-            </div>
-          `;
-        }
+          </div>
+        `;
         container.appendChild(col);
       });
 
@@ -1835,38 +1959,39 @@ function cargarFotosEnModal(folderUrl) {
     .obtenerFotosCarpeta(APP.token, folderId);
 }
 /**
- * Muestra una foto ampliada en un modal o ventana nueva
+ * Muestra una foto ampliada en un modal usando el preview de Google Drive
  * @param {string} imageUrl - URL de la imagen (puede ser downloadUrl o viewUrl)
  * @param {string} nombre - Nombre de la imagen
  */
 function verFotoAmpliada(imageUrl, nombre) {
-  // ✅ Si la URL es de descarga directa, convertir a vista previa
-  var previewUrl = imageUrl;
+  // ✅ Extraer el ID del archivo
   var fileId = imageUrl.match(/[-\w]{25,}/)?.[0];
   
-  if (fileId) {
-    // Usar la URL de vista previa de Google Drive
-    previewUrl = 'https://drive.google.com/file/d/' + fileId + '/preview';
+  if (!fileId) {
+    mostrarToast('❌ No se pudo identificar la imagen', 'error');
+    return;
   }
 
-  // ✅ Crear un modal simple para ver la foto ampliada
+  // ✅ URL de vista previa de Google Drive (diseñada para iframes)
+  var previewUrl = 'https://drive.google.com/file/d/' + fileId + '/preview';
+
+  // ✅ Crear un modal con iframe
   var modalHtml = `
     <div class="modal fade" id="modalFotoAmpliada" tabindex="-1" data-bs-backdrop="static">
       <div class="modal-dialog modal-dialog-centered modal-xl">
-        <div class="modal-content" style="background: rgba(0,0,0,0.9);">
+        <div class="modal-content" style="background: #1a1a2e; border: none;">
           <div class="modal-header border-0">
             <h5 class="modal-title text-white">${nombre || 'Foto'}</h5>
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
           </div>
-          <div class="modal-body text-center p-0">
-            <!-- ✅ Usar iframe para mostrar la imagen de Google Drive -->
+          <div class="modal-body p-0" style="height: 80vh;">
             <iframe src="${previewUrl}" 
-                    style="width: 100%; height: 80vh; border: none;"
+                    style="width: 100%; height: 100%; border: none;"
                     allowfullscreen>
             </iframe>
           </div>
           <div class="modal-footer border-0">
-            <a href="${previewUrl}" target="_blank" class="btn btn-outline-light btn-sm">
+            <a href="${imageUrl}" target="_blank" class="btn btn-outline-light btn-sm">
               <i class="bi bi-box-arrow-up-right me-1"></i>Abrir en nueva pestaña
             </a>
             <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
@@ -10415,7 +10540,7 @@ function limpiarCacheRegistros() {
 }
 
 /**
- * Limpia la caché y recarga los registros (pagina 1)
+ * Recarga los registros (limpia caché y recarga)
  */
 function recargarRegistros() {
   _cacheRegistros = null;
