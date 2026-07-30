@@ -9096,3 +9096,213 @@ function obtenerRegistros(token, filtros) {
     return { ok: false, error: err.message };
   }
 }
+// ============================================================
+// REPORTE MÚLTIPLE Y CAMBIO DE ESTADO - BACKEND
+// ============================================================
+
+/**
+ * Genera un reporte PDF con múltiples folios y los cambia a "En proceso de pago"
+ * @param {string} token - Token de sesión
+ * @param {Array} folios - Array de folios
+ * @returns {Object} { ok, pdfBase64, nombre, foliosProcesados }
+ */
+function generarReporteMultiple(token, folios) {
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    if (!folios || folios.length === 0) {
+      return { ok: false, error: 'No hay folios para procesar.' };
+    }
+
+    console.log('📄 Generando reporte para ' + folios.length + ' folios');
+
+    // 1. Obtener registros
+    var registros = [];
+    for (var i = 0; i < folios.length; i++) {
+      var reg = _obtenerRegistroPorFolio(folios[i]);
+      if (reg) {
+        registros.push(reg);
+      }
+    }
+
+    if (registros.length === 0) {
+      return { ok: false, error: 'No se encontraron registros para los folios.' };
+    }
+
+    // 2. Generar HTML del reporte
+    var html = _generarReporteMultipleHTML(registros, sesionResp.sesion);
+    if (!html) {
+      return { ok: false, error: 'Error al generar el HTML del reporte.' };
+    }
+
+    // 3. Convertir a PDF
+    var pdfBlob = _convertirHTMLaPDF(html, 'Reporte_Revisiones');
+    var pdfBytes = pdfBlob.getBytes();
+    var pdfBase64 = Utilities.base64Encode(pdfBytes);
+
+    // 4. ✅ Cambiar estado SOLO si están en "Listo para pago"
+    var actualizados = 0;
+    var yaEnProceso = 0;
+    for (var j = 0; j < folios.length; j++) {
+      try {
+        var reg = _obtenerRegistroPorFolio(folios[j]);
+        if (reg) {
+          var estadoActual = reg.ESTADO || '';
+          if (estadoActual === 'Listo para pago') {
+            _actualizarEstadoRegistro(folios[j], 'En proceso de pago');
+            actualizados++;
+          } else if (estadoActual === 'En proceso de pago') {
+            yaEnProceso++;
+          }
+        }
+      } catch (err) {
+        console.warn('⚠️ No se pudo actualizar folio ' + folios[j] + ':', err.message);
+      }
+    }
+
+    console.log('✅ Reporte generado para ' + registros.length + ' registros');
+    console.log('   Actualizados a "En proceso de pago": ' + actualizados);
+    console.log('   Ya estaban en "En proceso de pago": ' + yaEnProceso);
+
+    return {
+      ok: true,
+      pdfBase64: pdfBase64,
+      nombre: 'Reporte_Revisiones_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss') + '.pdf',
+      foliosProcesados: registros.length,
+      actualizados: actualizados,
+      yaEnProceso: yaEnProceso
+    };
+
+  } catch (err) {
+    console.error('❌ Error en generarReporteMultiple:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Marca múltiples folios como "Pagado"
+ * @param {string} token - Token de sesión
+ * @param {Array} folios - Array de folios
+ * @returns {Object} { ok, mensaje }
+ */
+function marcarFoliosComoPagados(token, folios) {
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    if (sesionResp.sesion.rol > 2) {
+      return { ok: false, error: 'Sin permisos para marcar folios como pagados.' };
+    }
+
+    if (!folios || folios.length === 0) {
+      return { ok: false, error: 'No hay folios seleccionados.' };
+    }
+
+    var actualizados = 0;
+    var errores = [];
+
+    for (var i = 0; i < folios.length; i++) {
+      try {
+        _actualizarEstadoRegistro(folios[i], 'Pagado');
+        actualizados++;
+      } catch (err) {
+        errores.push(folios[i] + ': ' + err.message);
+      }
+    }
+
+    var mensaje = actualizados + ' folios marcados como pagados';
+    if (errores.length > 0) {
+      mensaje += '. Errores: ' + errores.join(', ');
+    }
+
+    return { ok: true, mensaje: mensaje, actualizados: actualizados };
+
+  } catch (err) {
+    console.error('❌ Error en marcarFoliosComoPagados:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Actualiza el estado de un registro en la bitácora
+ * @param {string} folio - Folio del registro
+ * @param {string} nuevoEstado - Nuevo estado
+ */
+function _actualizarEstadoRegistro(folio, nuevoEstado) {
+  try {
+    var sheet = SHEETS.BITACORA();
+    if (!sheet) {
+      throw new Error('No se encontró la hoja de Bitácora');
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var headers = datos[0];
+    var idxFolio = headers.indexOf('FOLIO');
+    var idxEstado = headers.indexOf('ESTADO');
+
+    if (idxFolio === -1 || idxEstado === -1) {
+      throw new Error('Columnas FOLIO o ESTADO no encontradas');
+    }
+
+    for (var i = 1; i < datos.length; i++) {
+      if ((datos[i][idxFolio] || '').toString() === folio) {
+        sheet.getRange(i + 1, idxEstado + 1).setValue(nuevoEstado);
+        console.log('✅ Estado actualizado a "' + nuevoEstado + '" para folio ' + folio);
+        return;
+      }
+    }
+
+    throw new Error('No se encontró el folio ' + folio);
+
+  } catch (err) {
+    console.error('❌ Error al actualizar estado:', err);
+    throw err;
+  }
+}
+/**
+ * Obtiene los tipos de revisión activos desde 💰_Tarifas
+ * @param {string} token - Token de sesión
+ * @returns {Object} { ok: true, tipos: [...] }
+ */
+function obtenerTiposRevision(token) {
+  try {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) {
+      return { ok: false, error: sesionResp.error };
+    }
+
+    var sheet = SHEETS.TARIFAS();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Tarifas' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var tipos = [];
+
+    for (var i = 1; i < datos.length; i++) {
+      var tipo = datos[i][0];
+      var descripcion = datos[i][1];
+      var precio = datos[i][2];
+      var activo = datos[i][4];
+
+      if (tipo && activo === true) {
+        tipos.push({
+          clave: tipo.toString().trim(),
+          descripcion: descripcion ? descripcion.toString().trim() : '',
+          precio: precio || 0
+        });
+      }
+    }
+
+    return { ok: true, tipos: tipos };
+
+  } catch (err) {
+    console.error('❌ Error en obtenerTiposRevision:', err);
+    return { ok: false, error: err.message };
+  }
+}

@@ -938,3 +938,305 @@ function _generarPDFBase(token, folio, opciones = {}) {
     };
   }
 }
+/**
+ * Genera el HTML para el reporte múltiple con resumen por técnico
+ * @param {Array} registros - Array de registros
+ * @param {Object} sesion - Sesión del usuario
+ * @returns {string} HTML completo
+ */
+function _generarReporteMultipleHTML(registros, sesion) {
+  try {
+    var fechaEmision = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
+    var tecnicoNombre = sesion.nombre || 'Revisor';
+    
+    // ── CONSTRUIR TABLA PRINCIPAL ──
+    var tablaFilas = '';
+    var contador = 0;
+    var totalGeneral = 0;
+    
+    // ── DATOS PARA RESUMEN POR TÉCNICO ──
+    var resumenTecnicos = {};
+    var tipos = ['IT', 'R', 'IM', 'CM', 'MC', 'MP', 'DI'];
+    
+    registros.forEach(function(reg) {
+      contador++;
+      var folio = reg.FOLIO || 'N/A';
+      var economico = reg.ECONOMICO || 'N/A';
+      var tipo = reg.TIPO_REVISION || 'N/A';
+      var tecnico = reg.TECNICO_NOMBRE || 'N/A';
+      var detalle = (reg.DETALLE_TRABAJO || '').substring(0, 50);
+      var plataforma = reg.PLATAFORMA || 'SAMSARA';
+      var fecha = reg.FECHA_SERVICIO ? _formatearFecha(reg.FECHA_SERVICIO) : 'N/A';
+      var estado = reg.ESTADO || 'N/A';
+      var precio = parseFloat(reg.PRECIO_UNITARIO || 0) || 0;
+      var notas = reg.NOTAS_REVISOR || '';
+      var funcionando = estado === 'Pagado' || estado === 'Aprobado' ? 'SI' : 'Pendiente';
+      var quienRevisa = reg.APROBADO_POR || tecnicoNombre;
+      
+      totalGeneral += precio;
+      
+      // ✅ Resumen por técnico
+      var tecnicoKey = tecnico;
+      if (!resumenTecnicos[tecnicoKey]) {
+        resumenTecnicos[tecnicoKey] = {
+          nombre: tecnico,
+          total: 0,
+          tipos: {}
+        };
+        tipos.forEach(function(t) {
+          resumenTecnicos[tecnicoKey].tipos[t] = 0;
+        });
+      }
+      resumenTecnicos[tecnicoKey].total += precio;
+      if (resumenTecnicos[tecnicoKey].tipos[tipo] !== undefined) {
+        resumenTecnicos[tecnicoKey].tipos[tipo]++;
+      }
+      
+      tablaFilas += `
+        <tr>
+          <td style="text-align:center;padding:4px 6px;border-bottom:1px solid #e2e8f0;">${contador}</td>
+          <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;">${economico}</td>
+          <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;">${tipo}</td>
+          <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;">${detalle}${detalle.length >= 50 ? '...' : ''}</td>
+          <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;">${plataforma}</td>
+          <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;">${funcionando}</td>
+          <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;">${fecha}</td>
+          <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;">${quienRevisa}</td>
+          <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;text-align:right;">$${precio.toFixed(2)}</td>
+          <td style="padding:4px 6px;border-bottom:1px solid #e2e8f0;">${notas.substring(0, 20)}</td>
+        </tr>
+      `;
+    });
+    
+    // ── CONSTRUIR TABLA DE RESUMEN POR TÉCNICO ──
+    var resumenFilas = '';
+    var totalGeneralResumen = 0;
+    var totalTipos = {};
+    tipos.forEach(function(t) {
+      totalTipos[t] = 0;
+    });
+    
+    for (var tec in resumenTecnicos) {
+      var data = resumenTecnicos[tec];
+      totalGeneralResumen += data.total;
+      
+      resumenFilas += `
+        <tr>
+          <td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;">${data.nombre}</td>
+          <td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;text-align:center;">${data.total > 0 ? '1' : '0'}</td>
+      `;
+      
+      tipos.forEach(function(t) {
+        var count = data.tipos[t] || 0;
+        totalTipos[t] += count;
+        resumenFilas += `
+          <td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;text-align:center;">${count}</td>
+        `;
+      });
+      
+      resumenFilas += `
+          <td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">$${data.total.toFixed(2)}</td>
+        </tr>
+      `;
+    }
+    
+    // ── FILA DE TOTALES EN RESUMEN ──
+    var totalTiposStr = '';
+    tipos.forEach(function(t) {
+      totalTiposStr += `
+        <td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;">${totalTipos[t]}</td>
+      `;
+    });
+    
+    var tiposHeaders = '';
+    tipos.forEach(function(t) {
+      tiposHeaders += `<th style="padding:4px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-size:7pt;">${t}</th>`;
+    });
+    
+    // ── CONSTRUIR HTML COMPLETO ──
+    var html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Reporte de Revisiones Técnicas</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 8.5pt;
+      color: #1a202c;
+      padding: 15px 20px;
+      line-height: 1.3;
+      background: #fff;
+    }
+    
+    .header {
+      border-bottom: 3px solid #1a56db;
+      padding-bottom: 10px;
+      margin-bottom: 15px;
+    }
+    .logo {
+      font-size: 18pt;
+      font-weight: 700;
+      color: #1a56db;
+    }
+    .sub {
+      font-size: 8pt;
+      color: #64748b;
+    }
+    .titulo-reporte {
+      font-size: 14pt;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+    .fecha-generacion {
+      font-size: 8pt;
+      color: #94a3b8;
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 10px;
+    }
+    th {
+      background: #0f172a;
+      color: #fff;
+      padding: 5px 6px;
+      text-align: left;
+      font-size: 7pt;
+      text-transform: uppercase;
+    }
+    td {
+      padding: 3px 6px;
+      border-bottom: 1px solid #e2e8f0;
+      font-size: 7.5pt;
+    }
+    
+    .seccion {
+      margin-bottom: 12px;
+    }
+    .seccion-titulo {
+      font-size: 9pt;
+      font-weight: 700;
+      color: #1a56db;
+      border-bottom: 2px solid #1a56db;
+      padding-bottom: 4px;
+      margin-bottom: 6px;
+    }
+    
+    .footer {
+      margin-top: 15px;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 8px;
+      font-size: 7pt;
+      color: #94a3b8;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    
+    .no-break {
+      page-break-inside: avoid;
+    }
+    
+    .resumen-total {
+      font-weight: 700;
+      background: #f1f5f9;
+    }
+    
+    @page {
+      size: A4 landscape;
+      margin: 8mm 10mm;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <table style="border:none;margin-bottom:0;">
+      <tr>
+        <td style="border:none;padding:0;">
+          <div class="logo">🚛 Fleet Manager</div>
+          <div class="sub">Sistema de Gestión de Flotas · Samsara</div>
+        </td>
+        <td style="border:none;padding:0;text-align:right;">
+          <div class="fecha-generacion">Generado el ${fechaEmision}</div>
+          <div class="fecha-generacion">Usuario: ${tecnicoNombre}</div>
+        </td>
+      </tr>
+    </table>
+    <div class="titulo-reporte">📄 Reporte de Revisiones Técnicas</div>
+    <div style="font-size:8pt;color:#64748b;">${registros.length} folios procesados</div>
+  </div>
+
+  <!-- ─── TABLA PRINCIPAL ─── -->
+  <div class="seccion no-break">
+    <div class="seccion-titulo">📋 Detalle de Revisiones</div>
+    <table style="font-size:7pt;">
+      <thead>
+        <tr>
+          <th style="text-align:center;">#</th>
+          <th>Unidad</th>
+          <th>Tipo</th>
+          <th>Detalle</th>
+          <th>Plataforma</th>
+          <th>Funcionando</th>
+          <th>Fecha</th>
+          <th>Revisó</th>
+          <th style="text-align:right;">Costo</th>
+          <th>Observaciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tablaFilas}
+      </tbody>
+      <tfoot>
+        <tr style="background:#f1f5f9;">
+          <td colspan="8" style="text-align:right;font-weight:700;padding:4px 6px;">TOTAL GENERAL</td>
+          <td style="text-align:right;font-weight:700;padding:4px 6px;">$${totalGeneral.toFixed(2)}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <!-- ─── RESUMEN POR TÉCNICO ─── -->
+  <div class="seccion no-break">
+    <div class="seccion-titulo">👤 Resumen por Técnico</div>
+    <table style="font-size:7.5pt;">
+      <thead>
+        <tr>
+          <th style="padding:4px 8px;">Técnico</th>
+          <th style="padding:4px 8px;text-align:center;">Total Servicios</th>
+          ${tiposHeaders}
+          <th style="padding:4px 8px;text-align:right;">Total $</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${resumenFilas}
+        <!-- Fila de totales -->
+        <tr style="background:#f1f5f9;font-weight:700;">
+          <td style="padding:4px 8px;">TOTAL</td>
+          <td style="padding:4px 8px;text-align:center;">${registros.length}</td>
+          ${totalTiposStr}
+          <td style="padding:4px 8px;text-align:right;">$${totalGeneralResumen.toFixed(2)}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    <span>Reporte generado por ${tecnicoNombre}</span>
+    <span>Documento de control interno · Confidencial</span>
+  </div>
+</body>
+</html>`;
+
+    return html;
+
+  } catch (err) {
+    console.error('❌ Error en _generarReporteMultipleHTML:', err);
+    return null;
+  }
+}

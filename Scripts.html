@@ -1612,16 +1612,80 @@ function obtenerFoliosSeleccionados() {
  * Genera un reporte PDF con los folios filtrados (estado "Listo para pago")
  */
 function generarReporteSeleccion() {
-  // Obtener los folios filtrados actualmente
   var folios = obtenerFoliosFiltrados();
-  
+
   if (folios.length === 0) {
-    mostrarToast('⚠️ No hay folios en estado "Listo para pago" para generar el reporte.', 'warning');
+    mostrarToast('⚠️ No hay folios en estado "Listo para pago" o "En proceso de pago".', 'warning');
     return;
   }
 
-  if (!confirm('📄 ¿Generar reporte para ' + folios.length + ' folios?\n\n' +
-               'Los folios cambiarán automáticamente a "En proceso de pago".')) {
+  // ✅ VALIDACIÓN: Verificar que todos los folios tengan tipo de revisión asignado
+  var foliosSinTipo = [];
+  var foliosConTipo = [];
+  var foliosEnProceso = [];
+
+  // Revisar cada folio en la tabla
+  var filas = document.querySelectorAll('#tabla-body tr');
+  filas.forEach(function(tr) {
+    var folioCell = tr.querySelector('td:nth-child(2) code');
+    var tipoCell = tr.querySelector('td:nth-child(5) .badge');
+    var estadoCell = tr.querySelector('td:nth-child(8) .badge');
+    
+    if (folioCell && estadoCell) {
+      var folio = folioCell.textContent.trim();
+      var estado = estadoCell.textContent.trim();
+      var tipo = tipoCell ? tipoCell.textContent.trim() : '';
+      
+      // Solo verificar folios en "Listo para pago" o "En proceso de pago"
+      if (estado === 'Listo para pago' || estado === 'En proceso de pago') {
+        if (!tipo || tipo === 'Pendiente' || tipo === '—' || tipo === 'N/A') {
+          foliosSinTipo.push(folio);
+        } else {
+          foliosConTipo.push(folio);
+        }
+        if (estado === 'En proceso de pago') {
+          foliosEnProceso.push(folio);
+        }
+      }
+    }
+  });
+
+  // ✅ Si hay folios sin tipo, mostrar advertencia
+  if (foliosSinTipo.length > 0) {
+    var mensaje = '⚠️ Hay ' + foliosSinTipo.length + ' folio(s) sin tipo de revisión asignado:\n\n';
+    mensaje += foliosSinTipo.join('\n') + '\n\n';
+    mensaje += '📌 Estos folios NO se incluirán en el reporte.\n';
+    mensaje += '✅ ' + foliosConTipo.length + ' folio(s) con tipo asignado serán procesados.\n\n';
+    mensaje += '¿Deseas continuar solo con los folios que tienen tipo asignado?';
+
+    if (!confirm(mensaje)) {
+      return;
+    }
+    
+    // ✅ Actualizar la lista de folios a procesar
+    folios = foliosConTipo;
+    
+    if (folios.length === 0) {
+      mostrarToast('⚠️ No hay folios con tipo de revisión asignado para generar el reporte.', 'warning');
+      return;
+    }
+  }
+
+  // ✅ Verificar si todos están en "En proceso de pago"
+  var todosEnProceso = folios.length > 0 && folios.every(function(f) {
+    return foliosEnProceso.indexOf(f) !== -1;
+  });
+
+  var mensajeConfirmacion = '📄 ¿Generar reporte para ' + folios.length + ' folios?\n\n';
+  if (todosEnProceso) {
+    mensajeConfirmacion += '⚠️ Estos folios ya están en "En proceso de pago".\n';
+    mensajeConfirmacion += '📌 Solo se generará el PDF, NO se cambiará el estado.\n\n';
+  } else {
+    mensajeConfirmacion += '📌 Los folios cambiarán automáticamente a "En proceso de pago".\n\n';
+  }
+  mensajeConfirmacion += '¿Confirmas?';
+
+  if (!confirm(mensajeConfirmacion)) {
     return;
   }
 
@@ -1631,8 +1695,7 @@ function generarReporteSeleccion() {
     .withSuccessHandler(function(resp) {
       if (resp.ok) {
         mostrarToast('✅ Reporte generado: ' + resp.foliosProcesados + ' folios', 'success');
-        
-        // ✅ Descargar el PDF
+
         if (resp.pdfBase64) {
           var link = document.createElement('a');
           link.download = resp.nombre || 'Reporte_Revisiones.pdf';
@@ -1641,8 +1704,7 @@ function generarReporteSeleccion() {
           link.click();
           document.body.removeChild(link);
         }
-        
-        // ✅ Recargar la tabla
+
         recargarRegistros();
       } else {
         mostrarToast('❌ Error: ' + resp.error, 'error');
@@ -1656,38 +1718,36 @@ function generarReporteSeleccion() {
 }
 
 /**
- * Obtiene los folios que están en estado "Listo para pago" según los filtros actuales
+ * Obtiene los folios que están en estado "Listo para pago" O "En proceso de pago"
+ * según los filtros actuales
  * @returns {Array} Array de folios
  */
 function obtenerFoliosFiltrados() {
   var filas = document.querySelectorAll('#tabla-body tr');
   var folios = [];
-  
+
   filas.forEach(function(tr) {
     var estadoCell = tr.querySelector('td:nth-child(8) .badge');
-    if (estadoCell) {
+    var folioCell = tr.querySelector('td:nth-child(2) code');
+    
+    if (estadoCell && folioCell) {
       var estado = estadoCell.textContent.trim();
-      if (estado === 'Listo para pago') {
-        var folioCell = tr.querySelector('td:nth-child(2) code');
-        if (folioCell) {
-          folios.push(folioCell.textContent.trim());
-        }
+      if (estado === 'Listo para pago' || estado === 'En proceso de pago') {
+        folios.push(folioCell.textContent.trim());
       }
     }
   });
-  
-  // Si no hay filas en la tabla, intentar desde los datos filtrados
-  if (folios.length === 0) {
-    // Fallback: usar los registros en caché
-    if (_cacheRegistros && _cacheRegistros.length > 0) {
-      _cacheRegistros.forEach(function(r) {
-        if (r.ESTADO === 'Listo para pago' && r.FOLIO) {
-          folios.push(r.FOLIO);
-        }
-      });
-    }
+
+  // Fallback: usar caché
+  if (folios.length === 0 && _cacheRegistros && _cacheRegistros.length > 0) {
+    _cacheRegistros.forEach(function(r) {
+      var estado = r.ESTADO || '';
+      if ((estado === 'Listo para pago' || estado === 'En proceso de pago') && r.FOLIO) {
+        folios.push(r.FOLIO);
+      }
+    });
   }
-  
+
   return folios;
 }
 
@@ -1795,7 +1855,8 @@ function abrirDetalle(reg) {
     `;
   }
 
-  document.getElementById('modal-body-content').innerHTML = `
+  // ✅ Construir el HTML del modal (sin el select todavía)
+  var modalBodyHtml = `
     <div class="row g-3">
       <div class="col-6"><label class="form-label small text-muted">Económico</label>
         <p class="fw-bold">${reg.ECONOMICO}</p></div>
@@ -1805,14 +1866,13 @@ function abrirDetalle(reg) {
         <p><code>${reg.SERIE_GPS}</code></p></div>
       <div class="col-6">
         <label class="form-label small text-muted">Tipo de revisión</label>
-        ${esEditable
-          ? `<select id="edit-tipo" class="form-select form-select-sm">
-               <option value="">— Pendiente de asignar —</option>
-               <option value="IT" ${tipoActual==='IT'?'selected':''}>IT — Instalación Total ($500)</option>
-               <option value="R" ${tipoActual==='R'?'selected':''}>R — Revisión ($150)</option>
-               <option value="IM" ${tipoActual==='IM'?'selected':''}>IM — Instalación Módulo ($250)</option>
-             </select>`
-          : `<p>${tipoActual || 'Pendiente'} — $${reg.PRECIO_UNITARIO}</p>`}
+        <div id="contenedor-tipo-revision">
+          ${esEditable
+            ? `<select id="edit-tipo" class="form-select form-select-sm">
+                 <option value="">— Cargando tipos... —</option>
+               </select>`
+            : `<p>${tipoActual || 'Pendiente'} — $${reg.PRECIO_UNITARIO}</p>`}
+        </div>
       </div>
       <div class="col-12"><label class="form-label small text-muted">Técnico</label>
         <p>${reg.TECNICO_NOMBRE}</p></div>
@@ -1847,6 +1907,8 @@ function abrirDetalle(reg) {
       ${fotosHtml}
     </div>`;
 
+  document.getElementById('modal-body-content').innerHTML = modalBodyHtml;
+
   let footerHtml = `<button class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>`;
   if (esEditable) {
     footerHtml += `
@@ -1867,8 +1929,75 @@ function abrirDetalle(reg) {
   if (reg.FOTOS_DRIVE_URL) {
     cargarFotosEnModal(reg.FOTOS_DRIVE_URL);
   }
-}
 
+  // ✅ Si es editable, cargar los tipos de revisión dinámicamente
+  if (esEditable) {
+    cargarTiposRevisionEnSelect(tipoActual);
+  }
+}
+/**
+ * Carga los tipos de revisión en el select del modal
+ * @param {string} tipoSeleccionado - Tipo actualmente seleccionado
+ */
+function cargarTiposRevisionEnSelect(tipoSeleccionado) {
+  var select = document.getElementById('edit-tipo');
+  if (!select) return;
+
+  // Mostrar carga
+  select.innerHTML = '<option value="">— Cargando tipos... —</option>';
+
+  obtenerTiposRevision(function(tipos) {
+    if (!tipos || tipos.length === 0) {
+      select.innerHTML = `
+        <option value="">— Error al cargar tipos —</option>
+        <option value="IT">IT — Instalación Total</option>
+        <option value="R">R — Revisión</option>
+        <option value="IM">IM — Instalación Módulo</option>
+      `;
+      mostrarToast('⚠️ No se pudieron cargar los tipos de revisión. Usando lista por defecto.', 'warning');
+      return;
+    }
+
+    // Limpiar y llenar el select
+    select.innerHTML = '<option value="">— Selecciona un tipo —</option>';
+
+    tipos.forEach(function(tipo) {
+      var option = document.createElement('option');
+      option.value = tipo.clave;
+      option.textContent = tipo.clave + ' — ' + tipo.descripcion + ' ($' + tipo.precio + ')';
+      if (tipo.clave === tipoSeleccionado) {
+        option.selected = true;
+      }
+      select.appendChild(option);
+    });
+
+    console.log('✅ Tipos de revisión cargados:', tipos.length);
+  });
+}
+/**
+ * Obtiene los tipos de revisión desde la hoja 💰_Tarifas
+ * @param {Function} callback - Función a ejecutar con los tipos
+ */
+function obtenerTiposRevision(callback) {
+  if (!APP.token) {
+    callback([]);
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(resp) {
+      if (resp.ok && resp.tipos) {
+        callback(resp.tipos);
+      } else {
+        callback([]);
+      }
+    })
+    .withFailureHandler(function(err) {
+      console.error('❌ Error al obtener tipos de revisión:', err);
+      callback([]);
+    })
+    .obtenerTiposRevision(APP.token);
+}
 /**
  * Carga las fotos de una carpeta de Drive y las muestra en el modal
  * @param {string} folderUrl - URL de la carpeta en Drive
@@ -10307,12 +10436,12 @@ function cargarRegistros(pagina, forzarActualizacion) {
 
   // Mostrar carga inmediata
   tbody.innerHTML = `
-    <tr><td colspan="8" class="text-center text-muted py-3">
+    <tr><td colspan="9" class="text-center text-muted py-3">
       <div class="spinner-border spinner-border-sm me-2"></div>Cargando...
     </td></tr>
   `;
 
-  // Obtener filtros
+  // ✅ Obtener filtros correctamente
   var filtros = {
     estado: document.getElementById('fil-estado')?.value || '',
     tecnico: document.getElementById('fil-tecnico')?.value || '',
@@ -10322,7 +10451,7 @@ function cargarRegistros(pagina, forzarActualizacion) {
     limite: _registrosLimite
   };
 
-  console.log('📌 Filtros:', filtros);
+  console.log('📌 Filtros enviados al backend:', filtros);
 
   google.script.run
     .withSuccessHandler(function(resp) {
@@ -10330,7 +10459,7 @@ function cargarRegistros(pagina, forzarActualizacion) {
 
       if (!resp.ok) {
         mostrarToast(resp.error || 'Error al cargar', 'error');
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-3">${resp.error || 'Error'}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-3">${resp.error || 'Error'}</td></tr>`;
         return;
       }
 
@@ -10344,7 +10473,7 @@ function cargarRegistros(pagina, forzarActualizacion) {
       _cacheTimestamp = Date.now();
 
       if (registros.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-3">No hay registros</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-3">No hay registros</td></tr>`;
         if (vacioEl) vacioEl.classList.remove('d-none');
         renderPaginacion(0, 1, _registrosLimite);
         return;
@@ -10361,7 +10490,7 @@ function cargarRegistros(pagina, forzarActualizacion) {
     })
     .withFailureHandler(function(err) {
       console.error('❌ Error:', err);
-      tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-3">Error: ${err.message}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-3">Error: ${err.message}</td></tr>`;
       mostrarToast('Error: ' + err.message, 'error');
     })
     .obtenerRegistros(APP.token, filtros);
