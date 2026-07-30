@@ -872,42 +872,47 @@
             </div>
           </div>
 
-          <!-- 🔍 FILTROS DE INVENTARIO (CORRECTOS) -->
-          <div class="fm-filtros mb-3">
-            <div class="row g-2 align-items-end">
-              <div class="col-6 col-md-2">
-                <label class="form-label small">Estado</label>
-                <select id="fil-inv-estado" class="form-select form-select-sm" onchange="cargarInventario()">
+          <!-- 🔍 FILTROS DE FLOTILLA (CORRECTOS) -->
+<div class="fm-filtros mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-6 col-md-2">
+      <label class="form-label small">Estado</label>
+      <select id="fil-flotilla-estado" class="form-select form-select-sm" onchange="cargarFlotilla()">
         <option value="">Todos</option>
-        <!-- ✅ Se llena dinámicamente desde 📋_Estados_Inventario -->
+        <!-- ✅ Se llena dinámicamente desde 📋_Catálogo_Estados_Vehiculo -->
       </select>
-              </div>
-              <div class="col-6 col-md-2">
-                <label class="form-label small">Tipo</label>
-                <select id="fil-inv-tipo" class="form-select form-select-sm" onchange="cargarInventario()">
-        <option value="">Todos</option>
-        <option value="VG">📡 Gateway</option>
-        <option value="CM">📷 Cámara</option>
-      </select>
-              </div>
-              <div class="col-6 col-md-3">
-                <label class="form-label small">Tipo de Unidad</label>
-                <select id="fil-inv-tipo-unidad" class="form-select form-select-sm" onchange="cargarInventario()">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label small">Tipo de Unidad</label>
+      <select id="fil-flotilla-tipo-unidad" class="form-select form-select-sm" onchange="cargarFlotilla()">
         <option value="">Todos</option>
         <!-- Se llena dinámicamente desde el catálogo -->
       </select>
-              </div>
-              <div class="col-6 col-md-3">
-                <label class="form-label small">Buscar</label>
-                <input type="text" id="fil-inv-buscar" class="form-control form-control-sm" placeholder="Serie o económico..." oninput="cargarInventario()">
-              </div>
-              <div class="col-6 col-md-2">
-                <button class="btn btn-sm btn-outline-secondary w-100" onclick="limpiarFiltrosInventario()">
-        <i class="bi bi-funnel me-1"></i>Limpiar filtros
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label small">Empresa</label>
+      <select id="fil-flotilla-empresa" class="form-select form-select-sm" onchange="cargarFlotilla()">
+        <option value="">Todos</option>
+        <!-- Se llena dinámicamente -->
+      </select>
+    </div>
+    <div class="col-6 col-md-3">
+      <label class="form-label small">Buscar</label>
+      <div class="input-group input-group-sm">
+        <input type="text" id="fil-flotilla-buscar" class="form-control" placeholder="Económico o placas..." onkeyup="if(event.key==='Enter') cargarFlotilla()">
+        <button class="btn btn-outline-primary" onclick="cargarFlotilla()" title="Buscar">
+          <i class="bi bi-search"></i>
+        </button>
+      </div>
+    </div>
+    <div class="col-4 col-md-2">
+      <label class="form-label small">&nbsp;</label>
+      <button class="btn btn-sm btn-outline-secondary w-100" onclick="limpiarFiltrosFlotilla()">
+        <i class="bi bi-funnel me-1"></i>Limpiar
       </button>
-              </div>
-            </div>
-          </div>
+    </div>
+  </div>
+</div>
 
           <!-- 📋 Tabla de flotilla -->
           <div class="table-responsive">

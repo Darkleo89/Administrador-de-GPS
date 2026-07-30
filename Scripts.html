@@ -62,6 +62,8 @@ var _chartTecnicos = null;
 var _dashboardCargando = false;
 var _dashboardCargado = false;
 
+// Variable global para controlar la ejecución
+var inventarioCargando = false;
 // ════════════════════════════════════════════════════════════
 // INICIALIZACIÓN
 // ════════════════════════════════════════════════════════════
@@ -2889,8 +2891,14 @@ function cargarMisRegistros() {
 function cargarInventario() {
   console.log('📦 cargarInventario - Ejecutando');
   
-  // ✅ ELIMINAR ESTA LÍNEA: cargarDashboard();
-  
+  // ✅ EVITAR EJECUCIONES MÚLTIPLES
+  if (inventarioCargando) {
+    console.log('⏳ Inventario ya está cargando, ignorando...');
+    return;
+  }
+  inventarioCargando = true;
+
+  // ✅ CARGAR SELECTS SI ESTÁN VACÍOS
   var select = document.getElementById('fil-inv-estado');
   if (select && select.options.length <= 1) {
     cargarEstadosInventario();
@@ -2899,6 +2907,7 @@ function cargarInventario() {
   var tbody = document.getElementById('inventario-body');
   if (!tbody) { 
     console.warn('⚠️ No se encontró el cuerpo de la tabla de inventario'); 
+    inventarioCargando = false;
     return; 
   }
 
@@ -2906,21 +2915,65 @@ function cargarInventario() {
 
   if (!APP.token) {
     tbody.innerHTML = '<tr><td colspan="10" class="text-center text-danger py-3">Sesión expirada. Recarga la página.</td></tr>';
+    inventarioCargando = false;
     return;
   }
 
-  cargarDashboardEquipos();
-  cargarDashboardVehiculos();
+  // ✅ CARGAR DASHBOARDS
+  if (typeof cargarDashboardEquipos === 'function') {
+    cargarDashboardEquipos();
+  }
+  if (typeof cargarDashboardVehiculos === 'function') {
+    cargarDashboardVehiculos();
+  }
 
+  // ✅ OBTENER FILTROS (INCLUYENDO BÚSQUEDA)
   var filtroEstado = document.getElementById('fil-inv-estado')?.value || '';
   var filtroTipo = document.getElementById('fil-inv-tipo')?.value || '';
   var filtroTipoUnidad = document.getElementById('fil-inv-tipo-unidad')?.value || '';
-  var filtroBuscar = document.getElementById('fil-inv-buscar')?.value || '';
+  
+  // ✅ IMPORTANTE: Leer el valor del input de búsqueda
+  var inputBuscar = document.getElementById('fil-inv-buscar');
+  var filtroBuscar = inputBuscar ? inputBuscar.value : '';
+  
+  console.log('📊 Filtros de inventario:', {
+    estado: filtroEstado,
+    tipo: filtroTipo,
+    tipoUnidad: filtroTipoUnidad,
+    buscar: filtroBuscar
+  });
 
+  // ✅ CONSTRUIR OBJETO DE FILTROS PARA EL BACKEND
+  var filtros = {
+    estado: filtroEstado,
+    tipo: filtroTipo,
+    tipoUnidad: filtroTipoUnidad,
+    buscar: filtroBuscar
+  };
+
+  // ✅ VERIFICAR QUE FILTROS ESTÉ DEFINIDO
+  if (typeof filtros === 'undefined' || filtros === null) {
+    console.warn('⚠️ filtros es undefined, creando objeto vacío');
+    filtros = {
+      estado: '',
+      tipo: '',
+      tipoUnidad: '',
+      buscar: ''
+    };
+  }
+
+  console.log('📦 Enviando filtros al backend (verificado):', filtros);
+
+  // ✅ LLAMAR AL BACKEND CON FILTROS
   google.script.run
     .withSuccessHandler(function(resp) {
+      // ✅ DESBLOQUEAR AL TERMINAR
+      inventarioCargando = false;
+      
       if (!resp.ok) {
-        mostrarToast(resp.error || 'Error al cargar inventario', 'error');
+        if (typeof mostrarToast === 'function') {
+          mostrarToast(resp.error || 'Error al cargar inventario', 'error');
+        }
         tbody.innerHTML = '<tr><td colspan="10" class="text-center text-danger py-3">Error al cargar inventario</td></tr>';
         return;
       }
@@ -2931,20 +2984,26 @@ function cargarInventario() {
         return;
       }
 
+      // ✅ APLICAR FILTROS EN EL FRONTEND (respaldo)
       var equiposFiltrados = resp.equipos.filter(function(e) {
         var coincide = true;
         if (filtroEstado && e.estado !== filtroEstado) coincide = false;
         if (filtroTipo && e.tipo !== filtroTipo) coincide = false;
         if (filtroTipoUnidad && e.tipoUnidad !== filtroTipoUnidad) coincide = false;
-        if (filtroBuscar) {
+        
+        // ✅ FILTRO DE BÚSQUEDA (SERIE o ECONÓMICO)
+        if (filtroBuscar && coincide) {
           var busqueda = filtroBuscar.toUpperCase().trim();
           var serie = (e.serie || '').toUpperCase();
           var economico = (e.economico || '').toUpperCase();
-          if (serie.indexOf(busqueda) === -1 && economico.indexOf(busqueda) === -1) coincide = false;
+          if (serie.indexOf(busqueda) === -1 && economico.indexOf(busqueda) === -1) {
+            coincide = false;
+          }
         }
         return coincide;
       });
 
+      // ✅ ACTUALIZAR RESÚMENES
       var totalDisponibles = 0,
         totalInstalados = 0,
         totalGarantia = 0,
@@ -2961,6 +3020,7 @@ function cargarInventario() {
       document.getElementById('inv-garantia').textContent = totalGarantia;
       document.getElementById('inv-baja').textContent = totalBaja;
 
+      // ✅ RENDERIZAR TABLA
       tbody.innerHTML = '';
       equiposFiltrados.forEach(function(e) {
         var tr = document.createElement('tr');
@@ -3029,9 +3089,11 @@ function cargarInventario() {
       }
     })
     .withFailureHandler(function(err) {
+      // ✅ DESBLOQUEAR EN CASO DE ERROR
+      inventarioCargando = false;
       tbody.innerHTML = '<tr><td colspan="10" class="text-center text-danger py-3">Error: ' + err.message + '</td></tr>';
     })
-    .obtenerInventarioGPS(APP.token);
+    .obtenerInventarioGPS(APP.token, filtros); // ✅ ENVIAR FILTROS AL BACKEND
 }
 /**
  * Carga el resumen de equipos en el dashboard de inventario
@@ -3317,7 +3379,13 @@ function limpiarFiltrosInventario() {
   document.getElementById('fil-inv-estado').value = '';
   document.getElementById('fil-inv-tipo').value = '';
   document.getElementById('fil-inv-tipo-unidad').value = '';
-  document.getElementById('fil-inv-buscar').value = '';
+  
+  // ✅ IMPORTANTE: Limpiar el campo de búsqueda
+  var inputBuscar = document.getElementById('fil-inv-buscar');
+  if (inputBuscar) {
+    inputBuscar.value = '';
+  }
+  
   cargarInventario();
 }
 
@@ -4803,7 +4871,7 @@ function guardarTipoUnidadDesdeInventario(economico) {
 // ════════════════════════════════════════════════════════════
 function cargarFlotilla() {
   console.log('🚚 cargarFlotilla - Ejecutando...');
-  
+
   if (!APP.token) {
     setTimeout(cargarFlotilla, 500);
     return;
@@ -4812,7 +4880,7 @@ function cargarFlotilla() {
   // ✅ ESPERAR A QUE EL DOM ESTÉ LISTO Y FORZAR CARGA DE SELECTS
   setTimeout(function() {
     console.log('🔄 Forzando carga de selects...');
-    
+
     var selectTipo = document.getElementById('fil-flotilla-tipo-unidad');
     if (selectTipo && selectTipo.options.length <= 1) {
       console.log('📌 Cargando tipos de unidad...');
@@ -4832,7 +4900,7 @@ function cargarFlotilla() {
 
   var tbody = document.getElementById('flotilla-body');
   if (!tbody) return;
-  
+
   tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm me-2"></div>Cargando flotilla...</td></tr>';
 
   // Obtener filtros
@@ -4841,86 +4909,185 @@ function cargarFlotilla() {
   var filtroEmpresa = document.getElementById('fil-flotilla-empresa')?.value || '';
   var filtroBuscar = document.getElementById('fil-flotilla-buscar')?.value || '';
 
-  google.script.run
-    .withSuccessHandler(function(resp) {
-      if (!resp.ok) {
-        tbody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-3">${resp.error}</td></tr>`;
-        return;
-      }
-      
-      var vehiculos = resp.vehiculos || [];
-      
-      // Aplicar filtros
-      if (filtroEstado) {
-        vehiculos = vehiculos.filter(function(v) { 
-          return v.estadoNombre === filtroEstado || v.estadoId === filtroEstado; 
-        });
-      }
-      if (filtroTipoUnidad) {
-        vehiculos = vehiculos.filter(function(v) { 
-          return v.tipoUnidad === filtroTipoUnidad; 
-        });
-      }
-      if (filtroEmpresa) {
-        vehiculos = vehiculos.filter(function(v) { 
-          return v.empresa === filtroEmpresa; 
-        });
-      }
-      if (filtroBuscar) {
-        var busqueda = filtroBuscar.toUpperCase().trim();
-        vehiculos = vehiculos.filter(function(v) {
-          return (v.economico || '').toUpperCase().includes(busqueda) || 
-                 (v.placas || '').toUpperCase().includes(busqueda);
-        });
-      }
-
-      if (vehiculos.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">No hay vehículos con los filtros seleccionados</td></tr>';
-        actualizarResumenFlotilla([]);
-        return;
-      }
-
-      var html = '';
-      vehiculos.forEach(function(v) {
-        var gatewayMostrar = v.gatewaySerie || v.gateway || '-';
-        var camaraMostrar = v.camaraSerie || v.camara || '-';
-        var accesoriosMostrar = (v.accesorios && v.accesorios.length > 0) 
-          ? v.accesorios.join(', ') 
-          : '-';
-        
-        var estadoNombre = v.estadoNombre || 'Sin estado';
-        var estadoColor = v.estadoColor || 'secondary';
-        
-        html += `
-          <tr>
-            <td><strong>${v.economico||'-'}</strong></td>
-            <td>${v.placas||'-'}</td>
-            <td>${v.tipoVehiculo||'-'}</td>
-            <td>${(v.marca||'')} ${(v.modelo||'')}</td>
-            <td><span class="badge bg-${estadoColor}">${estadoNombre}</span></td>
-            <td>${v.tipoUnidad||'-'}</td>
-            <td><code style="font-size:11px;">${gatewayMostrar}</code></td>
-            <td><code style="font-size:11px;">${camaraMostrar}</code></td>
-            <td style="font-size:12px;">${accesoriosMostrar}</td>
-            <td>
-              <div class="btn-group btn-group-sm">
-                <button class="btn btn-outline-primary" onclick="mostrarFormEditarVehiculo('${v.economico}')" title="Editar"><i class="bi bi-pencil"></i></button>
-                <button class="btn btn-outline-secondary" onclick="abrirModalEstado('${v.economico}')" title="Cambiar estado"><i class="bi bi-tag"></i></button>
-                <button class="btn btn-outline-info" onclick="verDetalleVehiculo('${v.economico}')" title="Ver detalle"><i class="bi bi-eye"></i></button>
-              </div>
-            </td>
-          </tr>
-        `;
+  // ✅ OBTENER CATÁLOGOS PARA TRADUCCIÓN
+  Promise.all([
+    new Promise(function(resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function(resp) { resolve(resp); })
+        .withFailureHandler(function(err) { reject(err); })
+        .obtenerTiposVehiculo(APP.token);
+    }),
+    new Promise(function(resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function(resp) { resolve(resp); })
+        .withFailureHandler(function(err) { reject(err); })
+        .obtenerEstadosVehiculo(APP.token);
+    })
+  ])
+  .then(function(resultados) {
+    // 1. Procesar catálogo de tipos de vehículo
+    var tiposVehiculoMap = {};
+    var tiposVehiculo = resultados[0]?.tipos || resultados[0] || [];
+    if (Array.isArray(tiposVehiculo)) {
+      tiposVehiculo.forEach(function(t) {
+        // Si t es un string, usarlo directamente
+        if (typeof t === 'string') {
+          tiposVehiculoMap[t] = t;
+        } else {
+          // Si es objeto, extraer TIPO y DESCRIPCION
+          var clave = t.TIPO || t.clave || t;
+          var nombre = t.DESCRIPCION || t.nombre || t;
+          tiposVehiculoMap[clave] = nombre;
+        }
       });
-      
-      tbody.innerHTML = html;
-      actualizarResumenFlotilla(vehiculos);
-      
-    })
-    .withFailureHandler(function(err) {
-      tbody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-3">Error: ${err.message}</td></tr>`;
-    })
-    .obtenerFlotillaCompleta(APP.token, {});
+    }
+
+    // 2. Procesar catálogo de estados de vehículo
+    var estadosVehiculoMap = {};
+    var estadosVehiculo = resultados[1]?.estados || resultados[1] || [];
+    if (Array.isArray(estadosVehiculo)) {
+      estadosVehiculo.forEach(function(e) {
+        // Extraer id y nombre
+        var id = e.ID || e.id || e;
+        var nombre = e.NOMBRE || e.nombre || e;
+        estadosVehiculoMap[id] = nombre;
+      });
+    }
+
+    console.log('📚 Catálogos cargados:', {
+      tiposVehiculo: Object.keys(tiposVehiculoMap).length,
+      estadosVehiculo: Object.keys(estadosVehiculoMap).length
+    });
+
+    // 3. Obtener datos de la flotilla
+    google.script.run
+      .withSuccessHandler(function(resp) {
+        if (!resp.ok) {
+          tbody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-3">${resp.error}</td></tr>`;
+          return;
+        }
+
+        var vehiculos = resp.vehiculos || [];
+
+        // ✅ TRADUCIR VALORES CON COLORES DE ESTADO
+        vehiculos = vehiculos.map(function(v) {
+          // Traducir TIPO_VEHICULO
+          var tipoVehiculoKey = v.TIPO_VEHICULO || v.tipoVehiculo || '';
+          var tipoVehiculoNombre = tiposVehiculoMap[tipoVehiculoKey] || tipoVehiculoKey || '—';
+
+          // Traducir ESTADO
+          var estadoKey = v.ESTADO || v.estado || '';
+          var estadoNombre = estadosVehiculoMap[estadoKey] || 'Sin estado';
+          
+          // ✅ BUSCAR COLOR DEL ESTADO
+          var estadoColor = 'secondary';
+          if (Array.isArray(estadosVehiculo)) {
+            var estadoEncontrado = estadosVehiculo.find(function(e) {
+              // Comparar con id o ID
+              var estadoId = e.ID || e.id || '';
+              return estadoId.toString() === estadoKey.toString();
+            });
+            if (estadoEncontrado && estadoEncontrado.color) {
+              estadoColor = estadoEncontrado.color;
+            }
+          }
+
+          return {
+            ...v,
+            // Guardamos los valores originales por si se necesitan
+            _tipoVehiculoOriginal: v.TIPO_VEHICULO || v.tipoVehiculo,
+            _estadoOriginal: v.ESTADO || v.estado,
+            // Y los valores traducidos para mostrar
+            tipoVehiculoNombre: tipoVehiculoNombre,
+            estadoNombre: estadoNombre,
+            estadoColor: estadoColor
+          };
+        });
+
+        // Aplicar filtros (usando los valores traducidos)
+        if (filtroEstado) {
+          vehiculos = vehiculos.filter(function(v) {
+            return v.estadoNombre === filtroEstado;
+          });
+        }
+        if (filtroTipoUnidad) {
+          vehiculos = vehiculos.filter(function(v) {
+            return v.TIPO_UNIDAD === filtroTipoUnidad || v.tipoUnidad === filtroTipoUnidad;
+          });
+        }
+        if (filtroEmpresa) {
+          vehiculos = vehiculos.filter(function(v) {
+            return v.EMPRESA === filtroEmpresa || v.empresa === filtroEmpresa;
+          });
+        }
+        if (filtroBuscar) {
+          var busqueda = filtroBuscar.toUpperCase().trim();
+          vehiculos = vehiculos.filter(function(v) {
+            var eco = (v.ECONOMICO || v.economico || '').toUpperCase();
+            var placas = (v.PLACAS || v.placas || '').toUpperCase();
+            return eco.includes(busqueda) || placas.includes(busqueda);
+          });
+        }
+
+        if (vehiculos.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">No hay vehículos con los filtros seleccionados</td></tr>';
+          if (typeof actualizarResumenFlotilla === 'function') {
+            actualizarResumenFlotilla([]);
+          }
+          return;
+        }
+
+        // Renderizar tabla con valores traducidos
+        var html = '';
+        vehiculos.forEach(function(v) {
+          // Usar valores traducidos o los originales si no hay traducción
+          var tipoMostrar = v.tipoVehiculoNombre || v.TIPO_VEHICULO || v.tipoVehiculo || '—';
+          var estadoMostrar = v.estadoNombre || 'Sin estado';
+          var estadoColor = v.estadoColor || 'secondary';
+
+          var gatewayMostrar = v.gatewaySerie || v.GATEWAY_SERIE || v.gateway || '-';
+          var camaraMostrar = v.camaraSerie || v.CAMARA_SERIE || v.camara || '-';
+          var accesoriosMostrar = (v.accesorios && v.accesorios.length > 0)
+            ? v.accesorios.join(', ')
+            : '-';
+
+          html += `
+            <tr>
+              <td><strong>${v.ECONOMICO || v.economico || '-'}</strong></td>
+              <td>${v.PLACAS || v.placas || '-'}</td>
+              <td>${tipoMostrar}</td>
+              <td>${(v.MARCA || v.marca || '')} ${(v.MODELO || v.modelo || '')}</td>
+              <td><span class="badge bg-${estadoColor}">${estadoMostrar}</span></td>
+              <td>${v.TIPO_UNIDAD || v.tipoUnidad || '-'}</td>
+              <td><code style="font-size:11px;">${gatewayMostrar}</code></td>
+              <td><code style="font-size:11px;">${camaraMostrar}</code></td>
+              <td style="font-size:12px;">${accesoriosMostrar}</td>
+              <td>
+                <div class="btn-group btn-group-sm">
+                  <button class="btn btn-outline-primary" onclick="mostrarFormEditarVehiculo('${v.ECONOMICO || v.economico}')" title="Editar"><i class="bi bi-pencil"></i></button>
+                  <button class="btn btn-outline-secondary" onclick="abrirModalEstado('${v.ECONOMICO || v.economico}')" title="Cambiar estado"><i class="bi bi-tag"></i></button>
+                  <button class="btn btn-outline-info" onclick="verDetalleVehiculo('${v.ECONOMICO || v.economico}')" title="Ver detalle"><i class="bi bi-eye"></i></button>
+                </div>
+              </td>
+            </tr>
+          `;
+        });
+
+        tbody.innerHTML = html;
+        if (typeof actualizarResumenFlotilla === 'function') {
+          actualizarResumenFlotilla(vehiculos);
+        }
+
+      })
+      .withFailureHandler(function(err) {
+        tbody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-3">Error: ${err.message}</td></tr>`;
+      })
+      .obtenerFlotillaCompleta(APP.token, {});
+  })
+  .catch(function(err) {
+    console.error('❌ Error al cargar catálogos:', err);
+    tbody.innerHTML = `<tr><td colspan="10" class="text-center text-danger py-3">Error al cargar catálogos: ${err.message}</td></tr>`;
+  });
 }
 
 function renderizarTablaFlotilla(vehiculos, tbody) {
@@ -5308,6 +5475,7 @@ function mostrarFormEditarVehiculo(economico) {
     return;
   }
 
+  console.log('📝 Editando vehículo:', economico);
   mostrarToast('📋 Cargando datos del vehículo...', 'info');
 
   google.script.run
@@ -5325,6 +5493,9 @@ function mostrarFormEditarVehiculo(economico) {
         mostrarToast('Vehículo no encontrado', 'danger');
         return;
       }
+
+      // ✅ LOG PARA DEPURACIÓN
+      console.log('📌 Datos del vehículo:', vehiculo);
 
       // Configurar datos para el modal
       window._tiposUnidadTemp = ['UNIDAD', 'UTILITARIA', 'CAJA SECA', 'MÓVIL', 'DOLLY', 'REMOLQUE'];
@@ -5346,7 +5517,12 @@ function mostrarFormEditarVehiculo(economico) {
             document.getElementById('modal-vehiculo-marca').value = vehiculo.marca || '';
             document.getElementById('modal-vehiculo-modelo').value = vehiculo.modelo || '';
             document.getElementById('modal-vehiculo-ano').value = vehiculo.anio || vehiculo.año || '';
-            document.getElementById('modal-vehiculo-serie').value = vehiculo.serieVehiculo || '';
+            
+            // ✅ IMPORTANTE: Llenar el campo de serie (VIN)
+            var serieValor = vehiculo.serieVehiculo || vehiculo.SERIE_VEHICULO || vehiculo.serie || '';
+            document.getElementById('modal-vehiculo-serie').value = serieValor;
+            console.log('🔍 Serie asignada al modal:', serieValor);
+            
             document.getElementById('modal-vehiculo-editando').value = 'true';
             document.getElementById('modal-vehiculo-economico').readOnly = true;
 
@@ -5383,12 +5559,14 @@ function mostrarFormEditarVehiculo(economico) {
               }
             }
 
-            // ✅ Seleccionar Estado
-            if (vehiculo.estadoId) {
-              var estadoSelect = document.getElementById('modal-vehiculo-estado');
-              if (estadoSelect) {
+            // ✅ Seleccionar Estado (MEJORADO)
+            var estadoSelect = document.getElementById('modal-vehiculo-estado');
+            if (estadoSelect) {
+              // Intentar con estadoId o estado
+              var estadoValor = vehiculo.estadoId || vehiculo.estado || '';
+              if (estadoValor) {
                 for (var i = 0; i < estadoSelect.options.length; i++) {
-                  if (estadoSelect.options[i].value === vehiculo.estadoId.toString()) {
+                  if (estadoSelect.options[i].value === estadoValor.toString()) {
                     estadoSelect.selectedIndex = i;
                     break;
                   }
@@ -5415,6 +5593,9 @@ function guardarVehiculo() {
 }
 
 function guardarVehiculoFlotilla() {
+  console.log('💾 Guardando vehículo...');
+  
+  // ✅ RECOPILAR TODOS LOS DATOS (incluyendo empresa y serie)
   var datos = {
     economico: document.getElementById('modal-vehiculo-economico').value.trim(),
     placas: document.getElementById('modal-vehiculo-placas').value.trim(),
@@ -5423,10 +5604,12 @@ function guardarVehiculoFlotilla() {
     modelo: document.getElementById('modal-vehiculo-modelo').value.trim(),
     anio: document.getElementById('modal-vehiculo-ano').value,
     tipoUnidad: document.getElementById('modal-vehiculo-tipo-unidad').value,
-    estado: document.getElementById('modal-vehiculo-estado').value,
-    serieVehiculo: document.getElementById('modal-vehiculo-serie').value.trim(),
     // ✅ NUEVO: Empresa
-    empresa: document.getElementById('modal-vehiculo-empresa').value
+    empresa: document.getElementById('modal-vehiculo-empresa').value,
+    estado: document.getElementById('modal-vehiculo-estado').value,
+    // ✅ IMPORTANTE: Incluir la serie (VIN)
+    serieVehiculo: document.getElementById('modal-vehiculo-serie').value.trim().toUpperCase(),
+    editando: document.getElementById('modal-vehiculo-editando').value === 'true'
   };
 
   // Validaciones
@@ -5457,7 +5640,7 @@ function guardarVehiculoFlotilla() {
     .withFailureHandler(function(err) {
       mostrarToast('❌ Error al guardar: ' + err.message, 'danger');
     })
-    .guardarVehiculoFlotilla(datos);
+    .guardarVehiculoFlotilla(APP.token, datos);
 }
 
 function abrirModalEstado(economico) {

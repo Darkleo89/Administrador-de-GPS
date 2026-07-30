@@ -3314,8 +3314,9 @@ function verificarEquiposVehiculoBackend(token, economico) {
  * Obtiene todo el inventario
  * NOTA: La columna ECONOMICO_ASIGNADO en inventario referencia a ECONOMICO en catálogo
  */
-function obtenerInventarioGPS(token) {
+function obtenerInventarioGPS(token, filtros) {
   console.log('📦 obtenerInventarioGPS - INICIO');
+  console.log('📊 Filtros recibidos:', filtros);
 
   var sesionResp = validarSesion(token);
   if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
@@ -3333,11 +3334,10 @@ function obtenerInventarioGPS(token) {
 
     if (catalogoSheet) {
       var catalogoData = catalogoSheet.getDataRange().getValues();
-      // Saltar encabezado (fila 1)
       for (var c = 1; c < catalogoData.length; c++) {
-        var eco = (catalogoData[c][0] || '').toString().toUpperCase().trim(); // Columna 1: ECONOMICO
-        var tipoUnidad = (catalogoData[c][10] || '').toString().trim(); // Columna K = TIPO_UNIDAD
-        var estado = (catalogoData[c][8] || '').toString().toUpperCase().trim(); // Columna I = ESTADO
+        var eco = (catalogoData[c][0] || '').toString().toUpperCase().trim();
+        var tipoUnidad = (catalogoData[c][10] || '').toString().trim();
+        var estado = (catalogoData[c][8] || '').toString().toUpperCase().trim();
         if (eco) {
           tiposUnidad[eco] = tipoUnidad;
           vehiculosActivos[eco] = (estado === 'ACTIVO');
@@ -3349,33 +3349,63 @@ function obtenerInventarioGPS(token) {
     var datos = sheetInventario.getDataRange().getValues();
     var equipos = [];
 
+    // ✅ OBTENER FILTROS
+    var filtroEstado = (filtros && filtros.estado) || '';
+    var filtroTipo = (filtros && filtros.tipo) || '';
+    var filtroTipoUnidad = (filtros && filtros.tipoUnidad) || '';
+    var filtroBuscar = (filtros && filtros.buscar) || '';
+
     for (var i = 1; i < datos.length; i++) {
       var f = datos[i];
       if (!f[0]) continue;
 
       var economico = (f[5] || '').toString().trim();
       var economicoUpper = economico.toUpperCase().trim();
+      var serie = (f[0] || '').toString().trim();
+      var estado = (f[4] || '').toString().trim();
+      var tipo = (f[1] || '').toString().trim();
+
+      // ✅ APLICAR FILTROS
+      // Filtro por estado
+      if (filtroEstado && estado !== filtroEstado) continue;
+      
+      // Filtro por tipo
+      if (filtroTipo && tipo !== filtroTipo) continue;
+      
+      // Filtro por tipo de unidad (desde catálogo)
+      if (filtroTipoUnidad) {
+        var tipoUnidadFiltro = (tiposUnidad[economicoUpper] || '').toString().trim();
+        if (tipoUnidadFiltro !== filtroTipoUnidad) continue;
+      }
+
+      // ✅ FILTRO DE BÚSQUEDA (SERIE o ECONÓMICO)
+      if (filtroBuscar) {
+        var busqueda = filtroBuscar.toUpperCase().trim();
+        var serieUpper = serie.toUpperCase();
+        var economicoUpperBuscar = economico.toUpperCase();
+        if (serieUpper.indexOf(busqueda) === -1 && economicoUpperBuscar.indexOf(busqueda) === -1) {
+          continue;
+        }
+      }
 
       // ✅ Obtener el tipo de unidad del vehículo desde el catálogo
-      // Si el vehículo existe en el catálogo, usar su tipo, si no, vacío
       var tipoUnidad = '';
       if (economico && tiposUnidad[economicoUpper] !== undefined) {
         tipoUnidad = tiposUnidad[economicoUpper];
       }
 
       equipos.push({
-        serie: f[0] || '',
-        tipo: f[1] || '',
+        serie: serie,
+        tipo: tipo,
         modelo: f[2] || '',
         imei: f[3] || '',
-        estado: f[4] || '',
+        estado: estado,
         economico: economico,
         fechaInstalacion: f[6] ? Utilities.formatDate(new Date(f[6]), Session.getScriptTimeZone(), 'dd/MM/yyyy') : '',
         ticketGarantia: f[7] || '',
         fechaGarantia: f[8] ? Utilities.formatDate(new Date(f[8]), Session.getScriptTimeZone(), 'dd/MM/yyyy') : '',
         ultimaActualizacion: f[9] ? Utilities.formatDate(new Date(f[9]), Session.getScriptTimeZone(), 'dd/MM/yyyy') : '',
         observaciones: f[10] || '',
-        // ✅ TIPO_UNIDAD desde el catálogo (por vehículo)
         tipoUnidad: tipoUnidad
       });
     }
@@ -5058,8 +5088,15 @@ function obtenerFlotillaCompleta(token, filtros) {
     var idxAnio = headers.indexOf('AÑO');
     var idxEstado = headers.indexOf('ESTADO');
     var idxTipoUnidad = headers.indexOf('TIPO_UNIDAD');
+    var idxSerieVehiculo = headers.indexOf('SERIE_VEHICULO'); // ✅ NUEVO
+    var idxEmpresa = headers.indexOf('EMPRESA'); // ✅ NUEVO
+    var idxGpsActual = headers.indexOf('GPS_ACTUAL'); // ✅ NUEVO
+    var idxUltimoServicio = headers.indexOf('ULTIMO_SERVICIO'); // ✅ NUEVO
 
-    console.log('📌 Índices encontrados:', { idxEconomico, idxPlacas, idxTipoVehiculo, idxMarca, idxModelo, idxAnio, idxEstado, idxTipoUnidad });
+    console.log('📌 Índices encontrados:', { 
+      idxEconomico, idxPlacas, idxTipoVehiculo, idxMarca, idxModelo, 
+      idxAnio, idxEstado, idxTipoUnidad, idxSerieVehiculo, idxEmpresa 
+    });
 
     // ✅ OBTENER EQUIPOS DEL INVENTARIO
     var sheetEquipos = ss.getSheetByName('📦_Inventario_GPS');
@@ -5153,6 +5190,10 @@ function obtenerFlotillaCompleta(token, filtros) {
       var marca = (row[idxMarca] || '').toString().trim();
       var modelo = (row[idxModelo] || '').toString().trim();
       var anio = (row[idxAnio] || '').toString().trim();
+      var serieVehiculo = (row[idxSerieVehiculo] || '').toString().trim(); // ✅ NUEVO
+      var empresa = (row[idxEmpresa] || '').toString().trim(); // ✅ NUEVO
+      var gpsActual = (row[idxGpsActual] || '').toString().trim(); // ✅ NUEVO
+      var ultimoServicio = (row[idxUltimoServicio] || '').toString().trim(); // ✅ NUEVO
 
       // Aplicar filtros
       if (filtroEstado && estado !== filtroEstado) continue;
@@ -5177,6 +5218,12 @@ function obtenerFlotillaCompleta(token, filtros) {
         anio: anio || '',
         estado: estado || 'Inactivo',
         tipoUnidad: tipoUnidad || '—',
+        // ✅ NUEVOS CAMPOS
+        serieVehiculo: serieVehiculo || '',
+        empresa: empresa || '',
+        gpsActual: gpsActual || '',
+        ultimoServicio: ultimoServicio || '',
+        // ✅ CAMPOS EXISTENTES
         gateway: equipos.gateway || null,
         gatewaySerie: equipos.gatewaySerie || null,
         camara: equipos.camara || null,
@@ -5259,7 +5306,6 @@ function agregarVehiculoCatalogo(token, datos) {
  * @returns {object} { ok, tipos: [...] }
  */
 function obtenerTiposVehiculo(token) {
-  // ✅ USAR validarSesion
   var sesionResp = validarSesion(token);
   if (!sesionResp.ok) {
     return { ok: false, error: sesionResp.error };
@@ -5270,15 +5316,39 @@ function obtenerTiposVehiculo(token) {
     var sheet = ss.getSheetByName('📋_Tipos_Vehiculo');
 
     if (!sheet) {
-      // Si no existe la hoja, devolver valores por defecto
-      return { ok: true, tipos: ['Camión', 'Pickup', 'Van', 'SUV', 'Sedán', 'Otro'] };
+      console.log('📋 Hoja de tipos no encontrada, creando...');
+      sheet = ss.insertSheet('📋_Tipos_Vehiculo');
+      
+      var headers = ['TIPO', 'DESCRIPCION', 'ACTIVO'];
+      sheet.getRange(1, 1, 1, 3).setValues([headers]);
+      
+      var datosDefault = [
+        ['Camión', 'Vehículo de carga pesada', true],
+        ['Pickup', 'Camioneta de carga ligera', true],
+        ['Van', 'Furgoneta o panel', true],
+        ['SUV', 'Vehículo deportivo utilitario', true],
+        ['Sedán', 'Automóvil de pasajeros', true],
+        ['Otro', 'Otros tipos de vehículo', true]
+      ];
+      sheet.getRange(2, 1, datosDefault.length, 3).setValues(datosDefault);
+      sheet.setFrozenRows(1);
     }
 
     var data = sheet.getDataRange().getValues();
     var tipos = [];
+    
     for (var i = 1; i < data.length; i++) {
-      if (data[i][0]) {
-        tipos.push(data[i][0].toString().trim());
+      var fila = data[i];
+      if (!fila[0]) continue;
+      
+      // ✅ Verificar que esté activo (si existe la columna)
+      var activo = true;
+      if (fila[2] !== undefined) {
+        activo = fila[2] === true || fila[2] === 'TRUE' || fila[2] === 1;
+      }
+      
+      if (activo) {
+        tipos.push(fila[0].toString().trim());
       }
     }
 
@@ -5769,7 +5839,13 @@ function obtenerColorEstado(estadoId) {
 /**
  * Guarda o actualiza un vehículo en la flotilla
  */
-function guardarVehiculoFlotilla(datos) {
+function guardarVehiculoFlotilla(token, datos) {
+  // ✅ VALIDAR SESIÓN (si se envía token)
+  if (token) {
+    var sesionResp = validarSesion(token);
+    if (!sesionResp.ok) return { ok: false, error: sesionResp.error };
+  }
+  
   try {
     console.log('🚚 Guardando vehículo en flotilla:', datos);
     
@@ -5779,7 +5855,7 @@ function guardarVehiculoFlotilla(datos) {
       throw new Error('No se encontró la hoja 📋_Catalogo_Vehiculos');
     }
     
-    // Validar campos obligatorios
+    // ✅ VALIDAR CAMPOS OBLIGATORIOS
     if (!datos.economico || datos.economico.trim() === '') {
       throw new Error('El económico es obligatorio');
     }
@@ -5796,7 +5872,7 @@ function guardarVehiculoFlotilla(datos) {
     var ahora = new Date();
     var headers = sheet.getDataRange().getValues()[0];
     
-    // Obtener índices de columnas
+    // ✅ OBTENER ÍNDICES DE COLUMNAS
     var idxEconomico = headers.indexOf('ECONOMICO');
     var idxPlacas = headers.indexOf('PLACAS');
     var idxTipoVehiculo = headers.indexOf('TIPO_VEHICULO');
@@ -5810,7 +5886,7 @@ function guardarVehiculoFlotilla(datos) {
     var idxTipoUnidad = headers.indexOf('TIPO_UNIDAD');
     var idxEmpresa = headers.indexOf('EMPRESA');
 
-    // Si no existe la columna EMPRESA, crearla
+    // ✅ SI NO EXISTE LA COLUMNA EMPRESA, CREARLA
     if (idxEmpresa === -1) {
       var lastCol = sheet.getLastColumn() + 1;
       sheet.getRange(1, lastCol).setValue('EMPRESA');
@@ -5818,7 +5894,15 @@ function guardarVehiculoFlotilla(datos) {
       console.log('✅ Columna EMPRESA creada');
     }
     
-    // Buscar si ya existe el vehículo
+    // ✅ SI NO EXISTE LA COLUMNA SERIE_VEHICULO, CREARLA
+    if (idxSerieVehiculo === -1) {
+      var lastCol = sheet.getLastColumn() + 1;
+      sheet.getRange(1, lastCol).setValue('SERIE_VEHICULO');
+      idxSerieVehiculo = lastCol - 1;
+      console.log('✅ Columna SERIE_VEHICULO creada');
+    }
+    
+    // ✅ BUSCAR SI YA EXISTE EL VEHÍCULO
     var data = sheet.getDataRange().getValues();
     var filaExistente = -1;
     
@@ -5830,27 +5914,31 @@ function guardarVehiculoFlotilla(datos) {
       }
     }
     
-    // Preparar la fila completa
-    var nuevaFila = [
-      datos.economico.trim(),                    // ECONOMICO
-      datos.placas.trim(),                       // PLACAS
-      datos.tipoVehiculo || '',                  // TIPO_VEHICULO
-      datos.marca || '',                         // MARCA
-      datos.modelo || '',                        // MODELO
-      datos.anio || '',                          // AÑO
-      datos.serieVehiculo || '',                 // SERIE_VEHICULO
-      '',                                        // GPS_ACTUAL
-      datos.estado || 'Activo',                  // ESTADO
-      ahora,                                     // ULTIMO_SERVICIO
-      datos.tipoUnidad || '',                    // TIPO_UNIDAD
-      datos.empresa || ''                        // ✅ EMPRESA
-    ];
+    // ✅ PREPARAR LA FILA COMPLETA CON TODAS LAS COLUMNAS
+    // Crear un array del tamaño exacto de headers
+    var filaData = new Array(headers.length).fill('');
+    
+    // Asignar valores a cada columna
+    filaData[idxEconomico] = datos.economico.trim();
+    filaData[idxPlacas] = datos.placas.trim();
+    filaData[idxTipoVehiculo] = datos.tipoVehiculo || '';
+    filaData[idxMarca] = datos.marca || '';
+    filaData[idxModelo] = datos.modelo || '';
+    filaData[idxAnio] = datos.anio || datos.ano || '';
+    filaData[idxSerieVehiculo] = datos.serieVehiculo || ''; // ✅ IMPORTANTE: Guardar serie
+    filaData[idxGpsActual] = datos.gpsActual || '';
+    filaData[idxEstado] = datos.estado || 'Activo';
+    filaData[idxUltimoServicio] = ahora;
+    filaData[idxTipoUnidad] = datos.tipoUnidad || '';
+    filaData[idxEmpresa] = datos.empresa || '';
     
     if (filaExistente === -1) {
-      sheet.appendRow(nuevaFila);
+      // ✅ NUEVO VEHÍCULO
+      sheet.appendRow(filaData);
       console.log('✅ Vehículo agregado:', datos.economico);
     } else {
-      sheet.getRange(filaExistente, 1, 1, nuevaFila.length).setValues([nuevaFila]);
+      // ✅ ACTUALIZAR VEHÍCULO EXISTENTE
+      sheet.getRange(filaExistente, 1, 1, filaData.length).setValues([filaData]);
       console.log('✅ Vehículo actualizado:', datos.economico);
     }
     
@@ -9303,6 +9391,81 @@ function obtenerTiposRevision(token) {
 
   } catch (err) {
     console.error('❌ Error en obtenerTiposRevision:', err);
+    return { ok: false, error: err.message };
+  }
+}
+function obtenerInventarioCompleto(token, filtros) {
+  var sesionResp = validarSesion(token);
+  if (!sesionResp.ok) {
+    return { ok: false, error: sesionResp.error };
+  }
+
+  try {
+    var sheet = SHEETS.INVENTARIO();
+    if (!sheet) {
+      return { ok: false, error: 'No se encontró la hoja de Inventario.' };
+    }
+
+    var datos = sheet.getDataRange().getValues();
+    var headers = datos[0];
+
+    // Crear mapa de columnas
+    var colMap = {};
+    for (var i = 0; i < headers.length; i++) {
+      colMap[headers[i]] = i;
+    }
+
+    var inventario = [];
+
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
+      if (!fila || !fila[0]) continue;
+
+      // ✅ APLICAR FILTROS
+      // Filtro por estado
+      if (filtros.estado && fila[colMap['ESTADO']] !== filtros.estado) continue;
+
+      // Filtro por tipo
+      if (filtros.tipo && fila[colMap['TIPO']] !== filtros.tipo) continue;
+
+      // Filtro por tipo de unidad
+      if (filtros.tipoUnidad && fila[colMap['TIPO_UNIDAD']] !== filtros.tipoUnidad) continue;
+
+      // ✅ FILTRO DE BÚSQUEDA (serie o económico)
+      if (filtros.buscar) {
+        var busqueda = filtros.buscar.toUpperCase().trim();
+        var serie = (fila[colMap['SERIE']] || '').toString().toUpperCase();
+        var economico = (fila[colMap['ECONOMICO']] || '').toString().toUpperCase();
+        var placas = (fila[colMap['PLACAS']] || '').toString().toUpperCase();
+        
+        // Buscar en serie, económico o placas
+        if (!serie.includes(busqueda) && !economico.includes(busqueda) && !placas.includes(busqueda)) {
+          continue;
+        }
+      }
+
+      // Construir objeto del inventario
+      var item = {};
+      for (var j = 0; j < headers.length; j++) {
+        var valor = fila[j];
+        if (valor instanceof Date) {
+          valor = valor.toISOString().split('T')[0];
+        } else if (valor === undefined || valor === null) {
+          valor = '';
+        } else if (typeof valor === 'boolean') {
+          valor = valor ? 'Sí' : 'No';
+        } else {
+          valor = valor.toString();
+        }
+        item[headers[j]] = valor;
+      }
+      inventario.push(item);
+    }
+
+    return { ok: true, inventario: inventario };
+
+  } catch (err) {
+    console.error('❌ Error al obtener inventario:', err);
     return { ok: false, error: err.message };
   }
 }
